@@ -3,6 +3,9 @@
  * Handles download requests, storage, and cross-tab communication.
  */
 
+// Service Worker startup log — if you see this, the SW is alive
+console.log('[ProfileDownloader] Service Worker started');
+
 // Download queue for sequential processing (avoids Chrome download limits)
 let downloadQueue = [];
 let activeDownloads = 0;
@@ -66,26 +69,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  * The `filename` parameter may include subdirectories: "user_folder/file.ext"
  */
 async function handleDownload(url, filename, retries = 1) {
-  if (!filename || !filename.includes('/')) {
-    // Legacy flat filename — wrap in a folder
-    const safeName = (filename || 'media')
-      .replace(/[<>:"\\|?*\x00-\x1f]/g, '_')
-      .replace(/\s+/g, '_')
-      .replace(/^_+|_+$/g, '');
-    return handleDownloadWithPath(url, `${settings.downloadPath}/${safeName}`, retries);
-  }
-
-  // Split into folder and file parts
-  const parts = filename.split('/');
+  // Split into folder and file parts (expected format: "user_folder/file.ext")
+  const parts = (filename || 'media').split('/');
   const filePart = parts.pop() || 'media';
-  const folderPart = parts.join('_'); // sanitize any nested folders
+  const folderPart = parts.join('_');
 
   // Sanitize folder name
   const safeFolder = folderPart.replace(/[<>:"\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_').replace(/^_+|_+$/g, '');
-  // Sanitize file name (allow hyphens, underscores, dots)
+  // Sanitize file name
   const safeFile = filePart.replace(/[<>:"\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_').replace(/^_+|_+$/g, '');
 
-  const fullPath = `${settings.downloadPath}/${safeFolder}/${safeFile}`;
+  const fullPath = safeFolder
+    ? `${settings.downloadPath}/${safeFolder}/${safeFile}`
+    : `${settings.downloadPath}/${safeFile}`;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
