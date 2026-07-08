@@ -6,7 +6,7 @@
 // Download queue for sequential processing (avoids Chrome download limits)
 let downloadQueue = [];
 let activeDownloads = 0;
-const MAX_CONCURRENT = 3;
+let MAX_CONCURRENT = 3;
 
 // Default settings (overwritten by chrome.storage on install)
 let settings = {

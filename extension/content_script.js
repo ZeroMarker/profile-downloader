@@ -1,15 +1,20 @@
 /**
  * Profile Media Downloader — Content Script
- * Injected into supported platform pages to extract media data from the DOM.
+ * Continuously accumulates media items as the user scrolls, so that
+ * even content that gets removed from the DOM (virtual scrolling) is captured.
  *
- * The heavy HTML/JSON parsing is done by the Rust WASM core (called from popup.js).
- * This content script focuses on DOM-level extraction since it has direct page access.
+ * Uses MutationObserver to catch new media elements as they appear.
+ * When the popup sends 'extractMedia', the accumulated list is returned.
  */
 
 (function () {
   'use strict';
 
   let platform = null;
+  let accumulatedMedia = [];
+  let accumulatedSeen = new Set();
+  let observer = null;
+  let scanTimer = null;
 
   /**
    * Detect platform from URL.
@@ -24,7 +29,6 @@
 
   /**
    * Extract username from the current profile page URL.
-   * Handles: twitter.com/username, tiktok.com/@username, instagram.com/username
    */
   function extractUsername() {
     const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
@@ -33,12 +37,11 @@
   }
 
   /**
-   * Check if current page is a profile page (not home/feed/explore).
+   * Check if current page is a profile page.
    */
   function isProfilePage() {
     const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
     const firstSegment = path.split('/')[0] || '';
-    // Exclude non-profile pages
     const excluded = ['home', 'explore', 'notifications', 'messages', 'bookmarks',
                       'settings', 'search', 'i', 'login', 'signup', 'register',
                       'about', 'privacy', 'tos', 'discover', 'foryou', 'following',
@@ -46,112 +49,8 @@
     return firstSegment.length > 0 && !excluded.includes(firstSegment.toLowerCase());
   }
 
-  // ===== Twitter / X Extractors =====
-
-  function extractTwitterMedia() {
-    const media = [];
-    const seenUrls = new Set();
-    const username = extractUsername();
-
-    // Strategy 1: Extract from tweet articles in the timeline
-    const tweetArticles = document.querySelectorAll('article[data-testid="tweet"]');
-    tweetArticles.forEach((tweet) => {
-      const tweetLink = tweet.querySelector('a[href*="/status/"]');
-      const postUrl = tweetLink ? tweetLink.href : window.location.href;
-
-      // Images — Twitter serves via pbs.twimg.com
-      const imgs = tweet.querySelectorAll('img[src*="pbs.twimg.com/media"]');
-      imgs.forEach((img) => {
-        let src = img.src;
-        // Upgrade to highest quality
-        src = src.replace(/name=\w+/, 'name=large');
-        if (src && !seenUrls.has(src)) {
-          seenUrls.add(src);
-          media.push({
-            id: `tw_${extractTwitterMediaId(src)}`,
-            media_type: 'Image',
-            url: src,
-            thumbnail_url: img.src,
-            post_url: postUrl,
-            platform: 'twitter',
-            username,
-            content_type: 'image/jpeg',
-          });
-        }
-      });
-
-      // Videos — Twitter uses <video> with blob: URLs, but poster images are accessible
-      const videoEls = tweet.querySelectorAll('video');
-      videoEls.forEach((video) => {
-        const poster = video.poster;
-        if (poster && !seenUrls.has(poster)) {
-          seenUrls.add(poster);
-          // The poster is a thumbnail; actual video URL is in blob: (not directly accessible)
-          // We record it as a video with the poster as thumbnail
-          media.push({
-            id: `tw_video_${extractTwitterMediaId(poster)}`,
-            media_type: 'Video',
-            url: poster.replace(/name=\w+/, 'name=large'), // best available direct URL
-            thumbnail_url: poster,
-            post_url: postUrl,
-            platform: 'twitter',
-            username,
-            content_type: 'image/jpeg',
-            note: 'Video preview — direct video URL requires API access',
-          });
-        }
-      });
-
-      // GIFs
-      const gifs = tweet.querySelectorAll('video[src*="twimg.com/tweet_video"]');
-      gifs.forEach((gif) => {
-        const src = gif.src;
-        if (src && !seenUrls.has(src)) {
-          seenUrls.add(src);
-          media.push({
-            id: `tw_gif_${extractTwitterMediaId(src)}`,
-            media_type: 'Video',
-            url: src,
-            thumbnail_url: gif.poster || null,
-            post_url: postUrl,
-            platform: 'twitter',
-            username,
-            content_type: 'video/mp4',
-          });
-        }
-      });
-    });
-
-    // Strategy 2: Fallback — scan all images on the page
-    if (media.length === 0) {
-      const allImgs = document.querySelectorAll('img[src*="pbs.twimg.com/media"]');
-      allImgs.forEach((img) => {
-        let src = img.src.replace(/name=\w+/, 'name=large');
-        if (src && !seenUrls.has(src)) {
-          seenUrls.add(src);
-          media.push({
-            id: `tw_${extractTwitterMediaId(src)}`,
-            media_type: 'Image',
-            url: src,
-            thumbnail_url: img.src,
-            post_url: window.location.href,
-            platform: 'twitter',
-            username,
-            content_type: 'image/jpeg',
-          });
-        }
-      });
-    }
-
-    // Extract profile info
-    const profileInfo = extractTwitterProfile(username);
-
-    return { media, username, profileInfo };
-  }
-
   /**
    * Extract media ID from a Twitter CDN URL.
-   * e.g., https://pbs.twimg.com/media/AbCdEfGhIjK.jpg -> AbCdEfGhIjK
    */
   function extractTwitterMediaId(url) {
     const match = url.match(/\/media\/([A-Za-z0-9_-]+)/);
@@ -159,30 +58,129 @@
   }
 
   /**
-   * Extract Twitter profile information from the DOM.
+   * Try to get the real image URL, accounting for lazy loading.
+   * Some platforms store the actual URL in data-src, data-url, or similar.
    */
-  function extractTwitterProfile(username) {
-    const profileInfo = { username };
-    // Display name
-    const nameEl = document.querySelector('[data-testid="UserCell"] span, h2[role="heading"] a span');
-    if (nameEl) profileInfo.display_name = nameEl.textContent.trim();
-    // Avatar
-    const avatarEl = document.querySelector('img[src*="pbs.twimg.com/profile_images"]');
-    if (avatarEl) profileInfo.avatar_url = avatarEl.src;
-    return profileInfo;
+  function resolveImageUrl(img) {
+    // Try actual src first
+    if (img.src && !img.src.startsWith('data:') && !img.src.startsWith('blob:')) {
+      return img.src;
+    }
+    // Fallback to data attributes
+    return img.getAttribute('data-src')
+        || img.getAttribute('data-url')
+        || img.getAttribute('data-original')
+        || img.getAttribute('data-media-url')
+        || null;
   }
 
-  // ===== TikTok Extractors =====
+  // ===== Twitter / X =====
 
-  function extractTikTokMedia() {
-    const media = [];
-    const seenIds = new Set();
+  /**
+   * Scan the current DOM for Twitter media items and add them to accumulated list.
+   */
+  function scanTwitterDOM() {
     const username = extractUsername();
+    let found = 0;
 
-    // Strategy 1: Try SIGI_STATE (embedded JSON state)
+    // Scan all tweet articles currently in the DOM
+    const tweetArticles = document.querySelectorAll('article[data-testid="tweet"]');
+    tweetArticles.forEach((tweet) => {
+      const tweetLink = tweet.querySelector('a[href*="/status/"]');
+      const postUrl = tweetLink ? tweetLink.href : window.location.href;
+
+      // Images
+      const imgs = tweet.querySelectorAll('img[src*="pbs.twimg.com/media"], img[data-src*="pbs.twimg.com/media"]');
+      imgs.forEach((img) => {
+        let src = resolveImageUrl(img);
+        if (!src) return;
+        src = src.replace(/name=\w+/, 'name=large');
+        if (!accumulatedSeen.has(src)) {
+          accumulatedSeen.add(src);
+          accumulatedMedia.push({
+            id: `tw_${extractTwitterMediaId(src)}`,
+            media_type: 'Image',
+            url: src,
+            thumbnail_url: src,
+            post_url: postUrl,
+            platform: 'twitter',
+            username,
+            content_type: 'image/jpeg',
+          });
+          found++;
+        }
+      });
+
+      // Videos (poster images)
+      const videoEls = tweet.querySelectorAll('video[poster]');
+      videoEls.forEach((video) => {
+        const poster = video.poster;
+        if (poster && !accumulatedSeen.has(poster)) {
+          accumulatedSeen.add(poster);
+          accumulatedMedia.push({
+            id: `tw_video_${extractTwitterMediaId(poster)}`,
+            media_type: 'Video',
+            url: poster.replace(/name=\w+/, 'name=large'),
+            thumbnail_url: poster,
+            post_url: postUrl,
+            platform: 'twitter',
+            username,
+            content_type: 'image/jpeg',
+          });
+          found++;
+        }
+      });
+    });
+
+    // Also scan ALL images on the page (catches anything outside tweet articles)
+    const allImgs = document.querySelectorAll(
+      'img[src*="pbs.twimg.com/media"], img[data-src*="pbs.twimg.com/media"]'
+    );
+    allImgs.forEach((img) => {
+      let src = resolveImageUrl(img);
+      if (!src) return;
+      src = src.replace(/name=\w+/, 'name=large');
+      if (!accumulatedSeen.has(src)) {
+        accumulatedSeen.add(src);
+        accumulatedMedia.push({
+          id: `tw_${extractTwitterMediaId(src)}`,
+          media_type: 'Image',
+          url: src,
+          thumbnail_url: src,
+          post_url: window.location.href,
+          platform: 'twitter',
+          username,
+          content_type: 'image/jpeg',
+        });
+        found++;
+      }
+    });
+
+    return found;
+  }
+
+  /**
+   * Get Twitter profile info.
+   */
+  function getTwitterProfile(username) {
+    const info = { username };
+    const nameEl = document.querySelector('[data-testid="UserCell"] span, h2[role="heading"] a span');
+    if (nameEl) info.display_name = nameEl.textContent.trim();
+    const avatarEl = document.querySelector('img[src*="pbs.twimg.com/profile_images"]');
+    if (avatarEl) info.avatar_url = avatarEl.src;
+    return info;
+  }
+
+  // ===== TikTok =====
+
+  function scanTikTokDOM() {
+    const username = extractUsername();
+    let found = 0;
+
+    // Try SIGI_STATE
     try {
       const html = document.documentElement.innerHTML;
-      const sigiMatch = html.match(/window\.SIGI_STATE\s*=\s*(\{[\s\S]*\})\s*;?\s*<\/script>/);
+      const sigiMatch = html.match(/window\.SIGI_STATE\s*=\s*(\{[\s\S]*?\})\s*;?\s*<\/script>/);
       if (sigiMatch) {
         const sigi = JSON.parse(sigiMatch[1]);
         const itemModule = sigi.ItemModule;
@@ -190,9 +188,9 @@
           Object.values(itemModule).forEach((item) => {
             const video = item.video;
             const videoUrl = video?.playAddr?.[0] || video?.downloadAddr?.[0];
-            if (videoUrl && !seenIds.has(item.id)) {
-              seenIds.add(item.id);
-              media.push({
+            if (videoUrl && !accumulatedSeen.has(item.id)) {
+              accumulatedSeen.add(item.id);
+              accumulatedMedia.push({
                 id: `tt_${item.id}`,
                 media_type: 'Video',
                 url: videoUrl,
@@ -203,202 +201,226 @@
                 caption: item.desc || null,
                 content_type: 'video/mp4',
               });
+              found++;
             }
           });
         }
       }
-    } catch (err) {
-      console.warn('[ProfileDownloader] TikTok SIGI_STATE parse failed:', err);
-    }
+    } catch (_) {}
 
-    // Strategy 2: Fallback — extract video links from DOM
-    if (media.length === 0) {
-      const videoLinks = document.querySelectorAll('a[href*="/video/"]');
-      videoLinks.forEach((link) => {
-        const href = link.href;
-        const videoIdMatch = href.match(/\/video\/(\d+)/);
-        if (videoIdMatch && !seenIds.has(videoIdMatch[1])) {
-          seenIds.add(videoIdMatch[1]);
-          const thumbImg = link.querySelector('img');
-          media.push({
-            id: `tt_${videoIdMatch[1]}`,
-            media_type: 'Video',
-            url: href,
-            thumbnail_url: thumbImg?.src || null,
-            post_url: href,
-            platform: 'tiktok',
-            username,
-            content_type: 'video/mp4',
-          });
-        }
-      });
-    }
+    // Also scan DOM for video links
+    const videoLinks = document.querySelectorAll('a[href*="/video/"]');
+    videoLinks.forEach((link) => {
+      const href = link.href;
+      const match = href.match(/\/video\/(\d+)/);
+      if (match && !accumulatedSeen.has(match[1])) {
+        accumulatedSeen.add(match[1]);
+        const thumb = link.querySelector('img');
+        accumulatedMedia.push({
+          id: `tt_${match[1]}`,
+          media_type: 'Video',
+          url: href,
+          thumbnail_url: thumb?.src || null,
+          post_url: href,
+          platform: 'tiktok',
+          username,
+          content_type: 'video/mp4',
+        });
+        found++;
+      }
+    });
 
-    // Extract profile info
-    const profileInfo = extractTikTokProfile(username);
-
-    return { media, username, profileInfo };
+    return found;
   }
 
-  /**
-   * Extract TikTok profile information.
-   */
-  function extractTikTokProfile(username) {
-    const profileInfo = { username };
+  function getTikTokProfile(username) {
+    const info = { username };
     const nameEl = document.querySelector('h1[data-e2e="user-title"], h2[data-e2e="user-subtitle"]');
-    if (nameEl) profileInfo.display_name = nameEl.textContent.trim();
+    if (nameEl) info.display_name = nameEl.textContent.trim();
     const avatarEl = document.querySelector('img[data-e2e="user-avatar"]');
-    if (avatarEl) profileInfo.avatar_url = avatarEl.src;
-    // Stats
-    const followersEl = document.querySelector('[data-e2e="followers-count"]');
-    if (followersEl) profileInfo.follower_count = parseCount(followersEl.textContent);
-    const followingEl = document.querySelector('[data-e2e="following-count"]');
-    if (followingEl) profileInfo.following_count = parseCount(followingEl.textContent);
-    const likesEl = document.querySelector('[data-e2e="likes-count"]');
-    if (likesEl) profileInfo.post_count = parseCount(likesEl.textContent);
-    return profileInfo;
+    if (avatarEl) info.avatar_url = avatarEl.src;
+    return info;
   }
 
-  // ===== Instagram Extractors =====
+  // ===== Instagram =====
 
-  function extractInstagramMedia() {
-    const media = [];
-    const seenUrls = new Set();
+  function scanInstagramDOM() {
     const username = extractUsername();
+    let found = 0;
 
-    // Strategy 1: Try __INITIAL_STATE__ (embedded JSON)
+    // Try __INITIAL_STATE__
     try {
       const html = document.documentElement.innerHTML;
       const match = html.match(/window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\})\s*;/);
       if (match) {
         const data = JSON.parse(match[1]);
         const items = data?.items || data?.feed?.items || data?.profile?.items || [];
-
         items.forEach((item) => {
+          const id = `ig_${item.code || item.id}`;
+          if (accumulatedSeen.has(id)) return;
+          accumulatedSeen.add(id);
+
           if (item.carousel_media) {
-            // Carousel post — multiple images
             const urls = item.carousel_media
               .map((cm) => cm.image_versions2?.candidates?.[0]?.url)
               .filter(Boolean);
-            if (urls.length > 0 && !seenUrls.has(urls[0])) {
-              seenUrls.add(urls[0]);
-              media.push({
-                id: `ig_${item.code || item.id}`,
-                media_type: 'Image',
-                url: urls[0],
-                carousel_urls: urls,
-                thumbnail_url: null,
+            if (urls.length > 0) {
+              accumulatedMedia.push({
+                id, media_type: 'Image', url: urls[0],
+                carousel_urls: urls, thumbnail_url: null,
                 post_url: `https://instagram.com/p/${item.code}`,
-                platform: 'instagram',
-                username,
+                platform: 'instagram', username,
                 caption: item.caption?.text || item.caption || null,
                 content_type: 'image/jpeg',
               });
+              found++;
             }
           } else {
-            // Single image or video
-            const url = item.image_versions2?.candidates?.[0]?.url ||
-                        item.display_url || item.display_src;
-            if (url && !seenUrls.has(url)) {
-              seenUrls.add(url);
+            const url = item.image_versions2?.candidates?.[0]?.url
+                     || item.display_url || item.display_src;
+            if (url) {
               const isVideo = !!item.video_versions;
-              media.push({
-                id: `ig_${item.code || item.id}`,
-                media_type: isVideo ? 'Video' : 'Image',
+              accumulatedMedia.push({
+                id, media_type: isVideo ? 'Video' : 'Image',
                 url: isVideo ? (item.video_versions?.[0]?.url || url) : url,
                 thumbnail_url: url,
                 post_url: `https://instagram.com/p/${item.code}`,
-                platform: 'instagram',
-                username,
+                platform: 'instagram', username,
                 caption: item.caption?.text || item.caption || null,
                 content_type: isVideo ? 'video/mp4' : 'image/jpeg',
               });
+              found++;
             }
           }
         });
       }
-    } catch (err) {
-      console.warn('[ProfileDownloader] Instagram __INITIAL_STATE__ parse failed:', err);
-    }
+    } catch (_) {}
 
-    // Strategy 2: Fallback — extract from DOM images
-    if (media.length === 0) {
-      const imgs = document.querySelectorAll(
-        'img[src*="cdninstagram.com"], img[src*="fbcdn.net"], img[src*="scontent"]'
-      );
-      imgs.forEach((img) => {
-        const src = img.src;
-        if (src && !seenUrls.has(src) && !src.includes('profile_pic')) {
-          seenUrls.add(src);
-          media.push({
-            id: `ig_${src.split('/').pop().split('?')[0]}`,
-            media_type: 'Image',
-            url: src,
-            thumbnail_url: src,
-            post_url: window.location.href,
-            platform: 'instagram',
-            username,
-            content_type: 'image/jpeg',
-          });
-        }
+    // Also scan DOM images
+    const imgs = document.querySelectorAll(
+      'img[src*="cdninstagram.com"], img[data-src*="cdninstagram.com"], ' +
+      'img[src*="fbcdn.net"], img[data-src*="fbcdn.net"], ' +
+      'img[src*="scontent"], img[data-src*="scontent"]'
+    );
+    imgs.forEach((img) => {
+      const src = resolveImageUrl(img);
+      if (!src || src.includes('profile_pic') || accumulatedSeen.has(src)) return;
+      accumulatedSeen.add(src);
+      accumulatedMedia.push({
+        id: `ig_${src.split('/').pop().split('?')[0]}`,
+        media_type: 'Image', url: src, thumbnail_url: src,
+        post_url: window.location.href,
+        platform: 'instagram', username,
+        content_type: 'image/jpeg',
       });
-    }
+      found++;
+    });
 
-    // Extract profile info
-    const profileInfo = extractInstagramProfile(username);
-
-    return { media, username, profileInfo };
+    return found;
   }
 
-  /**
-   * Extract Instagram profile information.
-   */
-  function extractInstagramProfile(username) {
-    const profileInfo = { username };
+  function getInstagramProfile(username) {
+    const info = { username };
     const nameEl = document.querySelector('section h1, header h1');
-    if (nameEl) profileInfo.display_name = nameEl.textContent.trim();
+    if (nameEl) info.display_name = nameEl.textContent.trim();
     const avatarEl = document.querySelector('img[src*="profile_pic"], header img');
-    if (avatarEl) profileInfo.avatar_url = avatarEl.src;
-    return profileInfo;
+    if (avatarEl) info.avatar_url = avatarEl.src;
+    return info;
   }
 
-  // ===== Utilities =====
+  // ===== Dispatcher =====
 
   /**
-   * Parse a count string like "1.2K" or "3.5M" into a number.
+   * Run a full scan of the current DOM, accumulating any new media found.
    */
-  function parseCount(str) {
-    if (!str) return null;
-    const cleaned = str.trim().toLowerCase().replace(/,/g, '');
-    const match = cleaned.match(/^([\d.]+)\s*([km]?)$/);
-    if (!match) return parseInt(cleaned) || null;
-    const num = parseFloat(match[1]);
-    const mult = match[2] === 'k' ? 1000 : match[2] === 'm' ? 1000000 : 1;
-    return Math.round(num * mult);
-  }
-
-  /**
-   * Main extraction dispatcher.
-   */
-  function extractMedia() {
-    platform = detectPlatform();
-    if (!platform) return { error: 'Unsupported platform' };
-
-    if (!isProfilePage()) {
-      return { error: 'Please navigate to a user profile page.' };
-    }
-
+  function scanDOM() {
     switch (platform) {
-      case 'twitter':
-        return extractTwitterMedia();
-      case 'tiktok':
-        return extractTikTokMedia();
-      case 'instagram':
-        return extractInstagramMedia();
-      default:
-        return { error: 'Unknown platform' };
+      case 'twitter':  return scanTwitterDOM();
+      case 'tiktok':   return scanTikTokDOM();
+      case 'instagram': return scanInstagramDOM();
+      default:         return 0;
     }
   }
+
+  /**
+   * Get profile info for the current platform.
+   */
+  function getProfileInfo() {
+    const username = extractUsername();
+    switch (platform) {
+      case 'twitter':  return getTwitterProfile(username);
+      case 'tiktok':   return getTikTokProfile(username);
+      case 'instagram': return getInstagramProfile(username);
+      default:         return { username };
+    }
+  }
+
+  /**
+   * Debounced scan — triggered by MutationObserver.
+   */
+  function debouncedScan() {
+    if (scanTimer) clearTimeout(scanTimer);
+    scanTimer = setTimeout(() => {
+      const found = scanDOM();
+      if (found > 0) {
+        console.log(`[ProfileDownloader] +${found} new media items (total: ${accumulatedMedia.length})`);
+      }
+      scanTimer = null;
+    }, 300);
+  }
+
+  // ===== MutationObserver =====
+
+  /**
+   * Start observing DOM changes to catch dynamically loaded content.
+   */
+  function startObserver() {
+    if (observer) observer.disconnect();
+
+    observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.addedNodes.length > 0) {
+          debouncedScan();
+          break;
+        }
+      }
+    });
+
+    // Watch the main content area for new nodes
+    const targetNode = document.querySelector(
+      'main, [data-testid="primaryColumn"], section, ' +
+      'div[role="main"], div[data-pagelet], ' +
+      '#content, .timeline, .feed'
+    ) || document.body;
+
+    observer.observe(targetNode, {
+      childList: true,
+      subtree: true,
+    });
+
+    console.log(`[ProfileDownloader] Observer watching for new media on ${platform}`);
+  }
+
+  // ===== Init =====
+
+  /**
+   * Initialize the content script.
+   */
+  function init() {
+    platform = detectPlatform();
+    if (!platform) return;
+
+    if (!isProfilePage()) return;
+
+    // Initial full scan of whatever is already in the DOM
+    const initial = scanDOM();
+    console.log(`[ProfileDownloader] Initial scan: ${initial} items found`);
+
+    // Start watching for new content
+    startObserver();
+  }
+
+  // ===== Message Handler =====
 
   /**
    * Listen for messages from the popup.
@@ -406,15 +428,32 @@
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'extractMedia') {
       try {
-        const result = extractMedia();
-        sendResponse(result);
+        // Do a final scan right now to catch anything just added
+        scanDOM();
+
+        // Remove duplicates (shouldn't be any, but just in case)
+        const seen = new Set();
+        const deduped = accumulatedMedia.filter((m) => {
+          if (seen.has(m.id)) return false;
+          seen.add(m.id);
+          return true;
+        });
+        accumulatedMedia = deduped;
+
+        sendResponse({
+          media: accumulatedMedia,
+          username: extractUsername(),
+          profileInfo: getProfileInfo(),
+          totalScanned: accumulatedMedia.length,
+        });
       } catch (err) {
         console.error('[ProfileDownloader] Extraction error:', err);
         sendResponse({ error: err.message || 'Extraction failed' });
       }
     }
-    return true; // Keep message channel open for async
+    return true;
   });
 
-  console.log('[ProfileDownloader] Content script loaded on', detectPlatform());
+  // Start
+  init();
 })();
