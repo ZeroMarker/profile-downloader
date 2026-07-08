@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Profile Media Downloader</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <h1>📥 Profile Media Downloader</h1>
+      <p class="subtitle">Download media from X / TikTok / Instagram</p>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- Status / Platform Detection -->
+      <div id="status-section" class="section">
+        <div id="platform-indicator" class="platform-badge">
+          <span id="platform-icon">🔍</span>
+          <span id="platform-text">Detecting platform...</span>
+        </div>
+      </div>
+
+      <!-- Profile Info -->
+      <div id="profile-section" class="section hidden">
+        <div class="profile-card">
+          <img id="profile-avatar" class="avatar" src="" alt="avatar" />
+          <div class="profile-info">
+            <h3 id="profile-username">@username</h3>
+            <p id="profile-display-name" class="display-name"></p>
+            <p id="profile-stats" class="stats"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Media List -->
+      <div id="media-section" class="section hidden">
+        <div class="media-header">
+          <h2>Media</h2>
+          <span id="media-count" class="count-badge">0 items</span>
+        </div>
+        <div class="media-actions">
+          <button id="select-all-btn" class="btn btn-sm">Select All</button>
+          <button id="download-selected-btn" class="btn btn-primary btn-sm" disabled>
+            Download Selected (0)
+          </button>
+          <button id="download-all-btn" class="btn btn-secondary btn-sm">Download All</button>
+        </div>
+        <div id="media-list" class="media-grid">
+          <!-- Media items rendered by JS -->
+          <div class="loading">Loading media...</div>
+        </div>
+      </div>
+
+      <!-- Download Progress -->
+      <div id="progress-section" class="section hidden">
+        <h3>Downloads</h3>
+        <div id="progress-bar" class="progress-bar">
+          <div id="progress-fill" class="progress-fill" style="width: 0%"></div>
+        </div>
+        <p id="progress-text" class="progress-text">0 / 0 completed</p>
+      </div>
+
+      <!-- Error Display -->
+      <div id="error-section" class="section hidden">
+        <div class="error-card">
+          <span class="error-icon">⚠️</span>
+          <p id="error-text">An error occurred</p>
+          <button id="retry-btn" class="btn btn-sm">Retry</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>
+        <a href="https://github.com/markchen/profile-downloader" target="_blank">
+          v1.0.0
+        </a>
+      </p>
+    </footer>
+  </div>
+
+  <!-- WASM and App Scripts -->
+  <script src="popup.js" type="module"></script>
+</body>
+</html>
