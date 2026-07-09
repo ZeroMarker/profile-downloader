@@ -77,13 +77,113 @@
   // ===== Twitter / X =====
 
   /**
+   * Extract video URLs from Twitter's embedded JSON data using regex on raw text.
+   * Twitter embeds tweet data in <script data-app-state> which contains
+   * video_info.variants with direct MP4 URLs. We regex the raw JSON text
+   * instead of navigating the object tree — much more robust against structure changes.
+   */
+  function extractTwitterVideosFromJson(username) {
+    let found = 0;
+
+    // Regex patterns to find video URLs in JSON text
+    // Matches: "url":"https://video.twimg.com/...mp4"
+    const videoUrlRe = /"url"\s*:\s*"(https:\\\/\\\/video\.twimg\.com[^"]+\.mp4)"/g;
+    // Matches: "media_url_https":"https://pbs.twimg.com/media/..." (for thumbnails)
+    const mediaUrlRe = /"media_url_https"\s*:\s*"(https:\\\/\\\/pbs\.twimg\.com[^"]+)"/g;
+    // Matches media type
+    const typeRe = /"type"\s*:\s*"(video|animated_gif)"/g;
+    // Matches bitrate: "bitrate":832000
+    const bitrateRe = /"bitrate"\s*:\s*(\d+)/g;
+
+    // Collect all script tags that might contain tweet JSON data
+    const scriptSelectors = [
+      'script[data-app-state]',
+      'script[type="application/json"]',
+      'script#__NEXT_DATA__',
+    ];
+    const scriptTexts = [];
+    scriptSelectors.forEach((sel) => {
+      document.querySelectorAll(sel).forEach((s) => {
+        if (s.textContent && s.textContent.length > 1000) {
+          scriptTexts.push(s.textContent);
+        }
+      });
+    });
+
+    // If no JSON script tags, try innerHTML (TikTok-style inline JS objects)
+    if (scriptTexts.length === 0) {
+      const html = document.documentElement.innerHTML;
+      const inlineMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\});/);
+      if (inlineMatch) scriptTexts.push(inlineMatch[1]);
+    }
+
+    // Process each script text: find video URLs with associated data
+    scriptTexts.forEach((text) => {
+      // Strategy A: Find direct video URLs in the JSON
+      const videoUrls = new Map(); // url -> { bitrate, media_url }
+
+      // Reset and find all matches
+      videoUrlRe.lastIndex = 0;
+      let m;
+      while ((m = videoUrlRe.exec(text)) !== null) {
+        const url = m[1].replace(/\\\//g, '/');
+        // Look for the bitrate near this URL (scan backwards a bit)
+        const beforeUrl = text.substring(Math.max(0, m.index - 200), m.index);
+        const bitMatch = bitrateRe.exec(beforeUrl);
+        const bitrate = bitMatch ? parseInt(bitMatch[1]) : 0;
+        bitrateRe.lastIndex = 0;
+        // Store highest bitrate variant per URL
+        if (!videoUrls.has(url) || bitrate > videoUrls.get(url).bitrate) {
+          videoUrls.set(url, { bitrate, mediaUrl: null });
+        }
+      }
+
+      // Find media_url_https (thumbnails) and associate with video URLs
+      const mediaUrls = [];
+      mediaUrlRe.lastIndex = 0;
+      while ((m = mediaUrlRe.exec(text)) !== null) {
+        mediaUrls.push(m[1].replace(/\\\//g, '/'));
+      }
+
+      // Add found videos to accumulated media
+      if (videoUrls.size > 0) {
+        let idx = 0;
+        videoUrls.forEach((info, url) => {
+          if (!accumulatedSeen.has(url)) {
+            accumulatedSeen.add(url);
+            const thumb = mediaUrls[idx] || null;
+            accumulatedMedia.push({
+              id: `tw_vid_re_${idx}_${Date.now()}`,
+              media_type: 'Video',
+              url,
+              thumbnail_url: thumb ? thumb.replace(/name=\w+/, 'name=large') : null,
+              post_url: window.location.href,
+              platform: 'twitter',
+              username,
+              content_type: 'video/mp4',
+            });
+            found++;
+            idx++;
+          }
+        });
+      }
+    });
+
+    return found;
+  }
+
+
+  /**
    * Scan the current DOM for Twitter media items and add them to accumulated list.
    */
   function scanTwitterDOM() {
     const username = extractUsername();
     let found = 0;
 
-    // Scan all tweet articles currently in the DOM
+    // Priority 1: Extract videos from embedded JSON data (gets real MP4 URLs)
+    found += extractTwitterVideosFromJson(username);
+
+    // Priority 2: Scan all tweet articles for images
     const tweetArticles = document.querySelectorAll('article[data-testid="tweet"]');
     tweetArticles.forEach((tweet) => {
       const tweetLink = tweet.querySelector('a[href*="/status/"]');
@@ -111,11 +211,15 @@
         }
       });
 
-      // Videos (poster images)
+      // Video poster thumbnails — only add if we don't already have the real video
       const videoEls = tweet.querySelectorAll('video[poster]');
       videoEls.forEach((video) => {
         const poster = video.poster;
-        if (poster && !accumulatedSeen.has(poster)) {
+        // Check if we already have a video for this tweet (from JSON)
+        const alreadyHasVideo = accumulatedMedia.some(
+          (m) => m.media_type === 'Video' && m.post_url === postUrl
+        );
+        if (poster && !alreadyHasVideo && !accumulatedSeen.has(poster)) {
           accumulatedSeen.add(poster);
           accumulatedMedia.push({
             id: `tw_video_${extractTwitterMediaId(poster)}`,
@@ -132,7 +236,31 @@
       });
     });
 
-    // Also scan ALL images on the page (catches anything outside tweet articles)
+    // Priority 2b: DOM-level video URL detection (fallback when JSON data not found)
+    // Scans <video> and <source> elements for direct video.twimg.com URLs
+    const videoSources = document.querySelectorAll(
+      'video[src*="video.twimg.com"], source[src*="video.twimg.com"], ' +
+      'video[src*="tweet_video"], source[src*="tweet_video"]'
+    );
+    videoSources.forEach((el) => {
+      const src = el.src || el.getAttribute('src');
+      if (src && !accumulatedSeen.has(src)) {
+        accumulatedSeen.add(src);
+        accumulatedMedia.push({
+          id: `tw_dom_${src.split('/').pop().split('?')[0]}`,
+          media_type: 'Video',
+          url: src,
+          thumbnail_url: null,
+          post_url: window.location.href,
+          platform: 'twitter',
+          username,
+          content_type: 'video/mp4',
+        });
+        found++;
+      }
+    });
+
+    // Priority 3: Also scan ALL images on the page (catches anything outside tweet articles)
     const allImgs = document.querySelectorAll(
       'img[src*="pbs.twimg.com/media"], img[data-src*="pbs.twimg.com/media"]'
     );
