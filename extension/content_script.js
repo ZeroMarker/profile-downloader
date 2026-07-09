@@ -108,38 +108,16 @@
    * The injected script reads window.__INITIAL_STATE__ etc., finds video URLs,
    * and posts them back via window.postMessage.
    */
-  function injectPageScript() {
-    if (document.querySelector('#pd-injected-script')) return;
-    const script = document.createElement('script');
-    script.id = 'pd-injected-script';
-    script.textContent = [
-      '(function() {',
-      '  try {',
-      '    var sources = [window.__INITIAL_STATE__, window.__NEXT_DATA__, window.__data];',
-      '    var videoUrls = [];',
-      '    var seen = new Set();',
-      '    sources.forEach(function(src) {',
-      '      if (!src) return;',
-      '      var str = JSON.stringify(src);',
-      '      var re = /https?:\\/\\/video\\.twimg\\.com\\/[^\\s"\\)\']+\\.mp4/g;',
-      '      var m;',
-      '      while ((m = re.exec(str)) !== null) {',
-      '        if (!seen.has(m[0])) { seen.add(m[0]); videoUrls.push(m[0]); }',
-      '      }',
-      '    });',
-      '    if (videoUrls.length > 0) {',
-      '      window.postMessage({ source: "profile-downloader", type: "twitter-videos", urls: videoUrls }, "*");',
-      '    }',
-      '  } catch(e) {}',
-      '})();'
-    ].join('\n');
-    document.documentElement.appendChild(script);
-    script.remove();
-  }
-
-  /**
-   * Listen for postMessage from injected page script.
+    /**
+   * Request background to inject video extraction code into the page's main world
+   * via chrome.scripting.executeScript with world: 'MAIN'.
+   * This bypasses the page's CSP that blocks inline <script> injection.
    */
+  function requestPageScriptInjection() {
+    try {
+      chrome.runtime.sendMessage({ action: 'injectVideoExtractor' });
+    } catch(_) {}
+  }
   function setupPageMessageListener(username) {
     window.addEventListener('message', function(event) {
       if (event.data && event.data.source === 'profile-downloader' && event.data.type === 'twitter-videos') {
@@ -480,7 +458,7 @@
     setupPageMessageListener(extractUsername());
 
     // Inject page script to read JS runtime variables (Twitter video URLs)
-    injectPageScript();
+    requestPageScriptInjection();
 
     // Initial full scan
     const initial = scanDOM();

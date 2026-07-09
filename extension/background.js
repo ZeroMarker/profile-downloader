@@ -29,6 +29,45 @@ chrome.storage?.local.get(['downloadPath', 'maxConcurrent'], (result) => {
 });
 
 /**
+ * Inject video URL extraction code into the page's main world context.
+ * Uses chrome.scripting.executeScript with world: 'MAIN' to bypass
+ * page CSP that blocks inline <script> injection.
+ * The injected code reads window.__INITIAL_STATE__ etc. and posts
+ * results back via window.postMessage.
+ */
+async function injectVideoExtractor(tabId) {
+  if (!tabId) return;
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    world: 'MAIN',
+    func: () => {
+      try {
+        const sources = [window.__INITIAL_STATE__, window.__NEXT_DATA__, window.__data];
+        const videoUrls = [];
+        const seen = new Set();
+        sources.forEach(function(src) {
+          if (!src) return;
+          var str = JSON.stringify(src);
+          var re = /https?:\/\/video\.twimg\.com\/[^\s"\)']+\.mp4/g;
+          var m;
+          while ((m = re.exec(str)) !== null) {
+            if (!seen.has(m[0])) { seen.add(m[0]); videoUrls.push(m[0]); }
+          }
+        });
+        if (videoUrls.length > 0) {
+          window.postMessage({
+            source: 'profile-downloader',
+            type: 'twitter-videos',
+            urls: videoUrls,
+          }, '*');
+        }
+      } catch(e) {}
+    },
+  });
+}
+
+/**
  * Handle messages from popup and content scripts.
  */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -60,6 +99,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'getSettings':
       sendResponse(settings);
       return false;
+
+    case 'injectVideoExtractor':
+      // Inject video URL extraction code into the page's main world
+      // Bypasses page CSP that blocks inline <script> injection
+      injectVideoExtractor(sender.tab?.id)
+        .then(() => sendResponse({ success: true }))
+        .catch((err) => {
+          console.warn('[ProfileDownloader] injectVideoExtractor failed:', err);
+          sendResponse({ success: false, error: err.message });
+        });
+      return true;
   }
 });
 
