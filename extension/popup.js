@@ -119,10 +119,18 @@ async function init() {
 
     const url = new URL(tab.url);
     const hostname = url.hostname.toLowerCase();
+    const isFileUrl = url.protocol === 'file:';
 
     // Detect platform (pure JS, always works regardless of WASM)
     let platform;
-    if (hostname.includes('twitter.com') || hostname.includes('x.com')) {
+    if (isFileUrl) {
+      // For local HTML exports, try to detect from filename first
+      const path = decodeURIComponent(url.pathname).toLowerCase();
+      if (path.includes('twitter') || path.includes('x.com')) platform = 'twitter';
+      else if (path.includes('tiktok')) platform = 'tiktok';
+      else if (path.includes('instagram')) platform = 'instagram';
+      // If filename doesn't hint, content script will detect from page content
+    } else if (hostname.includes('twitter.com') || hostname.includes('x.com')) {
       platform = 'twitter';
     } else if (hostname.includes('tiktok.com')) {
       platform = 'tiktok';
@@ -147,10 +155,13 @@ async function init() {
     updatePlatformBadge(icon, label);
 
     // Check if we're on a profile page (not homepage/feed)
-    const pathSegments = url.pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
-    if (pathSegments.length === 0) {
-      showError('Please navigate to a user profile page first.');
-      return;
+    // For file:// URLs, skip this check — content script handles it
+    if (!isFileUrl) {
+      const pathSegments = url.pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+      if (pathSegments.length === 0) {
+        showError('Please navigate to a user profile page first.');
+        return;
+      }
     }
 
     // Extract media from the page via content script (with timeout)

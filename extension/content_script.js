@@ -21,6 +21,19 @@
 
   function detectPlatform() {
     const host = window.location.hostname.toLowerCase();
+    // file:// URLs — detect from page content (exported HTML)
+    if (!host || window.location.protocol === 'file:') {
+      const html = document.documentElement.innerHTML.toLowerCase();
+      if (html.includes('twitter.com') || html.includes('x.com')) return 'twitter';
+      if (html.includes('tiktok.com')) return 'tiktok';
+      if (html.includes('instagram.com')) return 'instagram';
+      // Check page title
+      const title = document.title.toLowerCase();
+      if (title.includes('x') || title.includes('twitter')) return 'twitter';
+      if (title.includes('tiktok')) return 'tiktok';
+      if (title.includes('instagram')) return 'instagram';
+      return null;
+    }
     if (host.includes('twitter.com') || host.includes('x.com')) return 'twitter';
     if (host.includes('tiktok.com')) return 'tiktok';
     if (host.includes('instagram.com')) return 'instagram';
@@ -28,12 +41,28 @@
   }
 
   function extractUsername() {
+    // For file:// URLs (exported pages), try to find username from page content
+    if (window.location.protocol === 'file:') {
+      // Try meta tags or canonical URL
+      const canonical = document.querySelector('link[rel="canonical"], meta[property="og:url"]');
+      if (canonical) {
+        const url = canonical.href || canonical.content;
+        const m = url.match(/(?:twitter|x)\.com\/([^\/\?#]+)/i);
+        if (m) return m[1].replace(/^@/, '');
+      }
+      // Try page title: "@username on X"
+      const titleMatch = document.title.match(/@(\S+)/);
+      if (titleMatch) return titleMatch[1];
+      return 'exported_page';
+    }
     const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
     const firstSegment = path.split('/')[0] || '';
     return firstSegment.replace(/^@/, '');
   }
 
   function isProfilePage() {
+    // file:// URLs are always treated as profile pages (exported content)
+    if (window.location.protocol === 'file:') return true;
     const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
     const firstSegment = path.split('/')[0] || '';
     const excluded = ['home', 'explore', 'notifications', 'messages', 'bookmarks',

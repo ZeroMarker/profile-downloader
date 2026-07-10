@@ -22,7 +22,8 @@
     "https://*.twimg.com/*",
     "https://*.cdninstagram.com/*",
     "https://*.tiktokcdn.com/*",
-    "https://*.fbcdn.net/*"
+    "https://*.fbcdn.net/*",
+    "file:///*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -44,7 +45,8 @@
         "https://x.com/*",
         "https://www.tiktok.com/*",
         "https://instagram.com/*",
-        "https://www.instagram.com/*"
+        "https://www.instagram.com/*",
+        "file:///*"
       ],
       "js": ["content_script.js"],
       "run_at": "document_idle"
