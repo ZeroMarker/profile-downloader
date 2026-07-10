@@ -6,16 +6,21 @@
 // Service Worker startup log — if you see this, the SW is alive
 console.log('[ProfileDownloader] Service Worker started');
 
-// Download queue for sequential processing (avoids Chrome download limits)
-let downloadQueue = [];
-let activeDownloads = 0;
-let MAX_CONCURRENT = 3;
-
 // Default settings (overwritten by chrome.storage on install)
 let settings = {
   downloadPath: 'ProfileDownloader',
   maxConcurrent: 3,
 };
+
+const DOWNLOAD_QUEUE_KEY = 'downloadQueueState';
+let downloadQueueState = {
+  pending: [],
+  active: {},
+  completed: 0,
+  failed: 0,
+};
+let queuePumpRunning = false;
+const downloadQueueLoaded = loadDownloadQueueState();
 
 /**
  * Load settings from storage on startup.
@@ -24,9 +29,26 @@ chrome.storage?.local.get(['downloadPath', 'maxConcurrent'], (result) => {
   if (result.downloadPath) settings.downloadPath = result.downloadPath;
   if (result.maxConcurrent) {
     settings.maxConcurrent = result.maxConcurrent;
-    MAX_CONCURRENT = result.maxConcurrent;
   }
+  pumpDownloadQueue();
 });
+
+async function loadDownloadQueueState() {
+  const stored = await chrome.storage.local.get(DOWNLOAD_QUEUE_KEY);
+  const state = stored?.[DOWNLOAD_QUEUE_KEY];
+  if (!state) return;
+
+  downloadQueueState = {
+    pending: Array.isArray(state.pending) ? state.pending : [],
+    active: state.active && typeof state.active === 'object' ? state.active : {},
+    completed: Number(state.completed) || 0,
+    failed: Number(state.failed) || 0,
+  };
+}
+
+async function persistDownloadQueue() {
+  await chrome.storage.local.set({ [DOWNLOAD_QUEUE_KEY]: downloadQueueState });
+}
 
 /**
  * Inject video URL extraction code into the page's main world context.
@@ -91,6 +113,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
       return true; // Keep channel open for async response
 
+    case 'downloadBatch':
+      enqueueDownloadBatch(request.items)
+        .then((result) => sendResponse({ success: true, ...result }))
+        .catch((err) => {
+          console.error('[ProfileDownloader] Batch download error:', err);
+          sendResponse({ success: false, error: err.message || 'Batch download failed' });
+        });
+      return true;
+
+    case 'getDownloadQueueStatus':
+      getDownloadQueueStatus().then(sendResponse);
+      return true;
+
     case 'getStorage':
       chrome.storage.local.get(request.keys, (result) => {
         sendResponse(result);
@@ -101,6 +136,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       chrome.storage.local.set(request.data, () => {
         if (request.data?.maxConcurrent) {
           settings.maxConcurrent = request.data.maxConcurrent;
+          pumpDownloadQueue();
         }
         sendResponse({ success: true });
       });
@@ -164,6 +200,115 @@ async function handleDownload(url, filename, retries = 1) {
   }
 }
 
+/**
+ * Persist a complete batch before replying to the popup. The service worker
+ * starts only maxConcurrent downloads and advances the queue on completion.
+ */
+async function enqueueDownloadBatch(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('No media items to download');
+  }
+
+  await downloadQueueLoaded;
+  const batchId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const accepted = [];
+  const errors = [];
+
+  items.forEach((item, index) => {
+    try {
+      validateDownloadUrl(item.url);
+      accepted.push({
+        queueId: `${batchId}_${index}`,
+        batchId,
+        id: item.id,
+        url: item.url,
+        filename: item.filename,
+      });
+    } catch (err) {
+      errors.push({ id: item.id, error: err.message || 'Invalid download' });
+    }
+  });
+
+  downloadQueueState.pending.push(...accepted);
+  await persistDownloadQueue();
+  pumpDownloadQueue();
+
+  return {
+    batchId,
+    queued: accepted.length,
+    failed: errors.length,
+    errors: errors.slice(0, 10),
+  };
+}
+
+async function getDownloadQueueStatus() {
+  await downloadQueueLoaded;
+  return {
+    pending: downloadQueueState.pending.length,
+    active: Object.keys(downloadQueueState.active).length,
+    completed: downloadQueueState.completed,
+    failed: downloadQueueState.failed,
+  };
+}
+
+async function pumpDownloadQueue() {
+  if (queuePumpRunning) return;
+  queuePumpRunning = true;
+
+  try {
+    await downloadQueueLoaded;
+    const limit = Math.max(1, Math.min(10, Number(settings.maxConcurrent) || 3));
+
+    while (
+      downloadQueueState.pending.length > 0
+      && Object.keys(downloadQueueState.active).length < limit
+    ) {
+      const item = downloadQueueState.pending.shift();
+      try {
+        const downloadId = await handleDownload(item.url, item.filename);
+        downloadQueueState.active[String(downloadId)] = item;
+      } catch (err) {
+        downloadQueueState.failed++;
+        console.error(`[ProfileDownloader] Could not start ${item.id}:`, err);
+      }
+      await persistDownloadQueue();
+    }
+  } finally {
+    queuePumpRunning = false;
+  }
+}
+
+async function settleQueuedDownload(downloadId, failed) {
+  await downloadQueueLoaded;
+  const key = String(downloadId);
+  if (!downloadQueueState.active[key]) return;
+
+  delete downloadQueueState.active[key];
+  if (failed) downloadQueueState.failed++;
+  else downloadQueueState.completed++;
+  await persistDownloadQueue();
+  pumpDownloadQueue();
+}
+
+async function reconcileActiveDownloads() {
+  await downloadQueueLoaded;
+  let changed = false;
+
+  for (const key of Object.keys(downloadQueueState.active)) {
+    const matches = await chrome.downloads.search({ id: Number(key) });
+    const download = matches[0];
+    if (download?.state === 'in_progress') continue;
+
+    delete downloadQueueState.active[key];
+    if (download?.state === 'complete') downloadQueueState.completed++;
+    else downloadQueueState.failed++;
+    changed = true;
+  }
+
+  if (changed) await persistDownloadQueue();
+  pumpDownloadQueue();
+}
+
 function validateDownloadUrl(rawUrl) {
   let url;
   try {
@@ -201,8 +346,12 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
 chrome.downloads.onChanged.addListener((delta) => {
   if (delta.state?.current === 'complete') {
     console.log(`[ProfileDownloader] Download complete: ${delta.id}`);
+    settleQueuedDownload(delta.id, false);
   }
   if (delta.error?.current) {
     console.error(`[ProfileDownloader] Download failed (${delta.id}): ${delta.error.current}`);
+    settleQueuedDownload(delta.id, true);
   }
 });
+
+downloadQueueLoaded.then(() => reconcileActiveDownloads());

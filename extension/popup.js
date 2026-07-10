@@ -294,13 +294,13 @@ function updateDownloadButton() {
  */
 async function startDownload(selectedOnly) {
   if (state.isDownloading) return;
-  state.isDownloading = true;
 
   const items = selectedOnly
     ? state.mediaItems.filter((m) => state.selectedIds.has(m.id))
     : state.mediaItems;
 
   if (items.length === 0) return;
+  state.isDownloading = true;
 
   $('#download-all-btn').disabled = true;
   $('#download-selected-btn').disabled = true;
@@ -309,28 +309,30 @@ async function startDownload(selectedOnly) {
   sections.progress.classList.remove('hidden');
   const fill = $('#progress-fill');
   const text = $('#progress-text');
-  let completed = 0;
-  let failed = 0;
+  fill.style.width = '15%';
+  text.textContent = `Adding ${items.length} files to Chrome downloads...`;
 
-  for (const item of items) {
-    try {
-      const response = await chrome.runtime.sendMessage({
-        action: 'downloadMedia',
+  try {
+    const response = await chrome.runtime.sendMessage({
+      action: 'downloadBatch',
+      items: items.map((item) => ({
+        id: item.id,
         url: item.url,
         filename: generateFilename(item),
-      });
-      if (response?.success === false) {
-        throw new Error(response.error || 'Download failed');
-      }
-      completed++;
-    } catch (err) {
-      console.error(`Download failed for ${item.id}:`, err);
-      failed++;
+      })),
+    });
+    if (!response || response.error) {
+      throw new Error(response?.error || 'Could not start batch download');
     }
 
-    const progress = ((completed + failed) / items.length) * 100;
-    fill.style.width = `${progress}%`;
-    text.textContent = `${completed} / ${items.length} completed${failed > 0 ? ` (${failed} failed)` : ''}`;
+    fill.style.width = '100%';
+    text.textContent = `${response.queued} files queued in background${
+      response.failed > 0 ? ` (${response.failed} failed)` : ''
+    }`;
+  } catch (err) {
+    console.error('[ProfileDownloader] Batch download failed:', err);
+    fill.style.width = '100%';
+    text.textContent = `Download failed: ${err.message || 'Unknown error'}`;
   }
 
   state.isDownloading = false;
@@ -338,8 +340,6 @@ async function startDownload(selectedOnly) {
   $('#download-all-btn').disabled = false;
   $('#select-all-btn').disabled = false;
   updateDownloadButton();
-
-  text.textContent = `✅ Complete: ${completed}/${items.length}${failed > 0 ? ` (${failed} failed)` : ''}`;
 }
 
 /**
