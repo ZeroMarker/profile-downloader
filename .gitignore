@@ -25,3 +25,4 @@ wasm/
 
 # Build configuration directory (local)
 /build/
+.reasonix/
