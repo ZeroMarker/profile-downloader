@@ -56,7 +56,10 @@ fn extract_from_json_ld(html: &str, username: &str) -> Result<Vec<ProfileMedia>,
                                 post_url: url.to_string(),
                                 platform: "tiktok".to_string(),
                                 username: username.to_string(),
-                                caption: video.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()),
+                                caption: video
+                                    .get("name")
+                                    .and_then(|n| n.as_str())
+                                    .map(|s| s.to_string()),
                                 timestamp: video
                                     .get("uploadDate")
                                     .and_then(|d| d.as_str())
@@ -102,10 +105,7 @@ fn extract_from_sigi_state(html: &str, username: &str) -> Result<Vec<ProfileMedi
                                 .and_then(|a| a.first())
                                 .and_then(|u| u.as_str())
                             {
-                                let id = item
-                                    .get("id")
-                                    .and_then(|i| i.as_str())
-                                    .unwrap_or(url);
+                                let id = item.get("id").and_then(|i| i.as_str()).unwrap_or(url);
                                 let id = utils::generate_media_id("tiktok", username, id);
                                 items.push(ProfileMedia {
                                     id,
@@ -115,11 +115,17 @@ fn extract_from_sigi_state(html: &str, username: &str) -> Result<Vec<ProfileMedi
                                         .get("cover")
                                         .and_then(|c| c.as_str())
                                         .map(|s| s.to_string()),
-                                    post_url: format!("https://www.tiktok.com/@{}/video/{}", username,
-                                        item.get("id").and_then(|i| i.as_str()).unwrap_or("")),
+                                    post_url: format!(
+                                        "https://www.tiktok.com/@{}/video/{}",
+                                        username,
+                                        item.get("id").and_then(|i| i.as_str()).unwrap_or("")
+                                    ),
                                     platform: "tiktok".to_string(),
                                     username: username.to_string(),
-                                    caption: item.get("desc").and_then(|d| d.as_str()).map(|s| s.to_string()),
+                                    caption: item
+                                        .get("desc")
+                                        .and_then(|d| d.as_str())
+                                        .map(|s| s.to_string()),
                                     timestamp: item
                                         .get("createTime")
                                         .and_then(|t| t.as_str())

@@ -120,6 +120,7 @@ async function init() {
     const url = new URL(tab.url);
     const hostname = url.hostname.toLowerCase();
     const isFileUrl = url.protocol === 'file:';
+    const isHost = (domain) => hostname === domain || hostname.endsWith('.' + domain);
 
     // Detect platform (pure JS, always works regardless of WASM)
     let platform;
@@ -130,11 +131,11 @@ async function init() {
       else if (path.includes('tiktok')) platform = 'tiktok';
       else if (path.includes('instagram')) platform = 'instagram';
       // If filename doesn't hint, content script will detect from page content
-    } else if (hostname.includes('twitter.com') || hostname.includes('x.com')) {
+    } else if (isHost('twitter.com') || isHost('x.com')) {
       platform = 'twitter';
-    } else if (hostname.includes('tiktok.com')) {
+    } else if (isHost('tiktok.com')) {
       platform = 'tiktok';
-    } else if (hostname.includes('instagram.com')) {
+    } else if (isHost('instagram.com')) {
       platform = 'instagram';
     }
 

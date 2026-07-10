@@ -10,12 +10,18 @@ pub enum PlatformType {
 
 impl PlatformType {
     pub fn detect(url: &str) -> Option<Self> {
-        let url_lower = url.to_lowercase();
-        if url_lower.contains("twitter.com") || url_lower.contains("x.com") {
+        let parsed = url::Url::parse(url).ok()?;
+        let host = parsed.host_str()?.trim_start_matches("www.").to_lowercase();
+
+        if host == "twitter.com"
+            || host.ends_with(".twitter.com")
+            || host == "x.com"
+            || host.ends_with(".x.com")
+        {
             Some(Self::Twitter)
-        } else if url_lower.contains("tiktok.com") {
+        } else if host == "tiktok.com" || host.ends_with(".tiktok.com") {
             Some(Self::TikTok)
-        } else if url_lower.contains("instagram.com") {
+        } else if host == "instagram.com" || host.ends_with(".instagram.com") {
             Some(Self::Instagram)
         } else {
             None
@@ -135,29 +141,53 @@ mod tests {
 
     #[test]
     fn test_detect_twitter() {
-        assert_eq!(PlatformType::detect("https://twitter.com/elonmusk"), Some(PlatformType::Twitter));
-        assert_eq!(PlatformType::detect("https://x.com/elonmusk"), Some(PlatformType::Twitter));
+        assert_eq!(
+            PlatformType::detect("https://twitter.com/elonmusk"),
+            Some(PlatformType::Twitter)
+        );
+        assert_eq!(
+            PlatformType::detect("https://x.com/elonmusk"),
+            Some(PlatformType::Twitter)
+        );
     }
 
     #[test]
     fn test_detect_tiktok() {
-        assert_eq!(PlatformType::detect("https://www.tiktok.com/@user"), Some(PlatformType::TikTok));
+        assert_eq!(
+            PlatformType::detect("https://www.tiktok.com/@user"),
+            Some(PlatformType::TikTok)
+        );
     }
 
     #[test]
     fn test_detect_instagram() {
-        assert_eq!(PlatformType::detect("https://instagram.com/user"), Some(PlatformType::Instagram));
-        assert_eq!(PlatformType::detect("https://www.instagram.com/user"), Some(PlatformType::Instagram));
+        assert_eq!(
+            PlatformType::detect("https://instagram.com/user"),
+            Some(PlatformType::Instagram)
+        );
+        assert_eq!(
+            PlatformType::detect("https://www.instagram.com/user"),
+            Some(PlatformType::Instagram)
+        );
     }
 
     #[test]
     fn test_detect_unknown() {
         assert_eq!(PlatformType::detect("https://example.com"), None);
+        assert_eq!(PlatformType::detect("https://notx.com/user"), None);
+        assert_eq!(
+            PlatformType::detect("https://example.com/?next=https://x.com/user"),
+            None
+        );
+        assert_eq!(PlatformType::detect("not a url"), None);
     }
 
     #[test]
     fn test_from_str() {
-        assert_eq!(PlatformType::from_str("twitter"), Some(PlatformType::Twitter));
+        assert_eq!(
+            PlatformType::from_str("twitter"),
+            Some(PlatformType::Twitter)
+        );
         assert_eq!(PlatformType::from_str("x"), Some(PlatformType::Twitter));
         assert_eq!(PlatformType::from_str("TIKTOK"), Some(PlatformType::TikTok));
         assert_eq!(PlatformType::from_str("ig"), Some(PlatformType::Instagram));

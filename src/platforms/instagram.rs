@@ -46,10 +46,7 @@ fn extract_from_shared_data(html: &str, username: &str) -> Result<Vec<ProfileMed
                 .or_else(|| {
                     val.get("feed")
                         .and_then(|f| f.get("items"))
-                        .or_else(|| {
-                            val.get("profile")
-                                .and_then(|p| p.get("items"))
-                        })
+                        .or_else(|| val.get("profile").and_then(|p| p.get("items")))
                 })
                 .and_then(|i| i.as_array())
             {
@@ -90,7 +87,10 @@ fn extract_from_json_ld(html: &str, username: &str) -> Result<Vec<ProfileMedia>,
                             post_url: format!("https://instagram.com/{}", username),
                             platform: "instagram".to_string(),
                             username: username.to_string(),
-                            caption: val.get("caption").and_then(|c| c.as_str()).map(|s| s.to_string()),
+                            caption: val
+                                .get("caption")
+                                .and_then(|c| c.as_str())
+                                .map(|s| s.to_string()),
                             timestamp: val
                                 .get("datePublished")
                                 .and_then(|d| d.as_str())
@@ -135,7 +135,10 @@ fn extract_instagram_item(item: &serde_json::Value, username: &str) -> Option<Pr
             post_url: format!("https://instagram.com/p/{}", post_code),
             platform: "instagram".to_string(),
             username: username.to_string(),
-            caption: item.get("caption").and_then(|c| c.as_str()).map(|s| s.to_string()),
+            caption: item
+                .get("caption")
+                .and_then(|c| c.as_str())
+                .map(|s| s.to_string()),
             timestamp: item.get("taken_at").and_then(|t| t.as_i64()),
             file_size: None,
             content_type: Some("image/jpeg".to_string()),
@@ -146,13 +149,20 @@ fn extract_instagram_item(item: &serde_json::Value, username: &str) -> Option<Pr
         let post_code = item.get("code").and_then(|c| c.as_str()).unwrap_or("");
         Some(ProfileMedia {
             id,
-            media_type: if is_video { MediaType::Video } else { MediaType::Image },
+            media_type: if is_video {
+                MediaType::Video
+            } else {
+                MediaType::Image
+            },
             url,
             thumbnail_url: None,
             post_url: format!("https://instagram.com/p/{}", post_code),
             platform: "instagram".to_string(),
             username: username.to_string(),
-            caption: item.get("caption").and_then(|c| c.as_str()).map(|s| s.to_string()),
+            caption: item
+                .get("caption")
+                .and_then(|c| c.as_str())
+                .map(|s| s.to_string()),
             timestamp: item.get("taken_at").and_then(|t| t.as_i64()),
             file_size: None,
             content_type: Some(if is_video { "video/mp4" } else { "image/jpeg" }.to_string()),
@@ -173,7 +183,10 @@ fn extract_image_url(item: &serde_json::Value) -> Option<String> {
                     * (c.get("height").and_then(|h| h.as_i64()).unwrap_or(0))
             });
             if let Some(best) = best {
-                return best.get("url").and_then(|u| u.as_str()).map(|s| s.to_string());
+                return best
+                    .get("url")
+                    .and_then(|u| u.as_str())
+                    .map(|s| s.to_string());
             }
         }
     }
@@ -208,8 +221,9 @@ fn parse_instagram_date(s: &str) -> Option<i64> {
 /// Fallback regex extraction for Instagram.
 fn extract_from_html_regex(html: &str, username: &str) -> Result<Vec<ProfileMedia>, String> {
     // Match Instagram CDN image URLs
-    let re = Regex::new(r#"https?://[^\s"']*?cdninstagram\.com[^\s"']*?(?:\.(?:jpg|png|webp))[^\s"']*"#)
-        .map_err(|e| format!("Regex error: {}", e))?;
+    let re =
+        Regex::new(r#"https?://[^\s"']*?cdninstagram\.com[^\s"']*?(?:\.(?:jpg|png|webp))[^\s"']*"#)
+            .map_err(|e| format!("Regex error: {}", e))?;
 
     let mut items = Vec::new();
     let mut seen = std::collections::HashSet::new();

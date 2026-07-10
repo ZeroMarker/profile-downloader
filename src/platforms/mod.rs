@@ -1,6 +1,6 @@
-pub mod twitter;
-pub mod tiktok;
 pub mod instagram;
+pub mod tiktok;
+pub mod twitter;
 
 use crate::models::{PlatformType, ProfileMedia};
 
@@ -12,7 +12,11 @@ pub trait PlatformScraper {
 
 impl PlatformType {
     /// Extract media from HTML for this platform.
-    pub fn extract_from_html(&self, html: &str, page_url: &str) -> Result<Vec<ProfileMedia>, String> {
+    pub fn extract_from_html(
+        &self,
+        html: &str,
+        page_url: &str,
+    ) -> Result<Vec<ProfileMedia>, String> {
         match self {
             Self::Twitter => twitter::TwitterScraper::extract_media(html, page_url),
             Self::TikTok => tiktok::TikTokScraper::extract_media(html, page_url),

@@ -18,9 +18,11 @@
   let accumulatedSeen = new Set();
   let observer = null;
   let scanTimer = null;
+  const twitterVideoCandidates = new Map();
 
   function detectPlatform() {
     const host = window.location.hostname.toLowerCase();
+    const isHost = (domain) => host === domain || host.endsWith('.' + domain);
     // file:// URLs — detect from page content (exported HTML)
     if (!host || window.location.protocol === 'file:') {
       const html = document.documentElement.innerHTML.toLowerCase();
@@ -34,9 +36,9 @@
       if (title.includes('instagram')) return 'instagram';
       return null;
     }
-    if (host.includes('twitter.com') || host.includes('x.com')) return 'twitter';
-    if (host.includes('tiktok.com')) return 'tiktok';
-    if (host.includes('instagram.com')) return 'instagram';
+    if (isHost('twitter.com') || isHost('x.com')) return 'twitter';
+    if (isHost('tiktok.com')) return 'tiktok';
+    if (isHost('instagram.com')) return 'instagram';
     return null;
   }
 
@@ -78,6 +80,7 @@
   }
 
   function resolveImageUrl(img) {
+    if (!img) return null;
     if (img.src && !img.src.startsWith('data:') && !img.src.startsWith('blob:')) {
       return img.src;
     }
@@ -90,54 +93,96 @@
 
   // ===== Twitter / X =====
 
-  /**
-   * Extract video URLs from ALL script tags and raw HTML.
-   * Searches for video.twimg.com .mp4 URLs using regex.
-   */
-  function extractTwitterVideosFromHtml(username) {
+  function normalizeTwitterVideoUrl(rawUrl) {
+    if (!rawUrl) return null;
+    const decoded = String(rawUrl)
+      .replace(/\\u002F/gi, '/')
+      .replace(/\\\//g, '/')
+      .replace(/&amp;/gi, '&');
+
+    const match = decoded.match(/https?:\/\/video\.twimg\.com\/[^\s"<>']+?\.mp4(?:\?[^\s"<>']*)?/i);
+    if (!match) return null;
+
+    try {
+      const url = new URL(match[0]);
+      const path = url.pathname;
+      if (url.hostname !== 'video.twimg.com' || !path.endsWith('.mp4')) return null;
+      if (path.includes('/aud/')) return null;
+      if (/\/vid\/(?:avc1|hevc)\/\d+\/\d+\//i.test(path)) return null;
+      if (/\/(?:init|segment|chunk)[^/]*\.mp4$/i.test(path)) return null;
+      url.hash = '';
+      return url.href;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function extractTwitterVideoAssetId(url) {
+    if (!url) return null;
+    const value = String(url).replace(/\\u002F/gi, '/').replace(/\\\//g, '/');
+    const numericId = value.match(/\/(?:amplify_video|ext_tw_video)(?:_thumb)?\/(\d+)\//i);
+    if (numericId) return numericId[1];
+
+    const gifId = value.match(/\/tweet_video(?:_thumb)?\/([^/?#.]+)(?:\.(?:mp4|jpg|jpeg|png))?/i);
+    return gifId ? gifId[1] : null;
+  }
+
+  function twitterVideoQuality(url) {
+    const dimensions = url.match(/\/(\d{2,5})x(\d{2,5})\//);
+    const pixels = dimensions ? Number(dimensions[1]) * Number(dimensions[2]) : 0;
+    const bitrate = Number(new URL(url).searchParams.get('bitrate')) || 0;
+    return pixels * 10000000 + bitrate;
+  }
+
+  function rememberTwitterVideo(rawUrl) {
+    const url = normalizeTwitterVideoUrl(rawUrl);
+    if (!url) return false;
+
+    const assetId = extractTwitterVideoAssetId(url);
+    const key = assetId || new URL(url).pathname;
+    const current = twitterVideoCandidates.get(key);
+    if (!current || twitterVideoQuality(url) > twitterVideoQuality(current)) {
+      twitterVideoCandidates.set(key, url);
+      if (assetId) {
+        const existing = accumulatedMedia.find((item) => item.id === 'tw_video_' + assetId);
+        if (existing) existing.url = url;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /** Collect MP4 variants and keep only the highest quality URL per X media asset. */
+  function collectTwitterVideoCandidates() {
     let found = 0;
-    const videoUrlRe = /https?:\/\/video\.twimg\.com\/[^\s"<>']+\.mp4/g;
+    const sources = performance.getEntriesByType('resource').map((entry) => entry.name);
 
-    // Collect all script tag contents + raw HTML
-    const sources = [];
-    document.querySelectorAll('script').forEach((s) => {
-      if (s.textContent && s.textContent.length > 500) {
-        sources.push(s.textContent);
+    document.querySelectorAll('script').forEach((script) => {
+      if (script.textContent && script.textContent.includes('video.twimg.com')) {
+        sources.push(script.textContent);
       }
     });
-    sources.push(document.documentElement.innerHTML);
 
-    sources.forEach((text) => {
-      videoUrlRe.lastIndex = 0;
-      let m;
-      while ((m = videoUrlRe.exec(text)) !== null) {
-        const url = m[0];
-        if (!accumulatedSeen.has(url)) {
-          accumulatedSeen.add(url);
-          accumulatedMedia.push({
-            id: 'tw_vid_' + url.split('/').pop().split('?')[0],
-            media_type: 'Video',
-            url,
-            thumbnail_url: null,
-            post_url: window.location.href,
-            platform: 'twitter',
-            username,
-            content_type: 'video/mp4',
-          });
-          found++;
-        }
-      }
+    // Exported pages can contain escaped URLs outside script tags.
+    if (window.location.protocol === 'file:') {
+      sources.push(document.documentElement.innerHTML);
+    }
+
+    sources.forEach((source) => {
+      const decoded = String(source)
+        .replace(/\\u002F/gi, '/')
+        .replace(/\\\//g, '/')
+        .replace(/&amp;/gi, '&');
+      const matches = decoded.match(/https?:\/\/video\.twimg\.com\/[^\s"<>']+?\.mp4(?:\?[^\s"<>']*)?/gi) || [];
+      matches.forEach((url) => {
+        if (rememberTwitterVideo(url)) found++;
+      });
     });
+
     return found;
   }
 
   /**
-   * Inject a <script> into the page context to read JS runtime variables.
-   * Content scripts run in an isolated world and cannot access page JS vars.
-   * The injected script reads window.__INITIAL_STATE__ etc., finds video URLs,
-   * and posts them back via window.postMessage.
-   */
-    /**
    * Request background to inject video extraction code into the page's main world
    * via chrome.scripting.executeScript with world: 'MAIN'.
    * This bypasses the page's CSP that blocks inline <script> injection.
@@ -147,46 +192,113 @@
       chrome.runtime.sendMessage({ action: 'injectVideoExtractor' });
     } catch(_) {}
   }
-  function setupPageMessageListener(username) {
+  function setupPageMessageListener() {
     window.addEventListener('message', function(event) {
       if (event.data && event.data.source === 'profile-downloader' && event.data.type === 'twitter-videos') {
         var urls = event.data.urls || [];
         var found = 0;
         urls.forEach(function(url) {
-          if (!accumulatedSeen.has(url)) {
-            accumulatedSeen.add(url);
-            accumulatedMedia.push({
-              id: 'tw_vid_inj_' + url.split('/').pop().split('?')[0],
-              media_type: 'Video',
-              url: url,
-              thumbnail_url: null,
-              post_url: window.location.href,
-              platform: 'twitter',
-              username: username,
-              content_type: 'video/mp4',
-            });
-            found++;
-          }
+          if (rememberTwitterVideo(url)) found++;
         });
         if (found > 0) {
-          console.log('[ProfileDownloader] Injected script found', found, 'video(s)');
+          scanTwitterDOM();
+          console.log('[ProfileDownloader] Injected script found', found, 'video variant(s)');
         }
       }
     });
+  }
+
+  function twitterPostInfo(tweet, fallbackUsername) {
+    const links = tweet.querySelectorAll('a[href*="/status/"]');
+    for (const link of links) {
+      try {
+        const url = new URL(link.href, window.location.origin);
+        const match = url.pathname.match(/^\/([^/]+)\/status\/(\d+)/i);
+        if (match) {
+          return { username: match[1], tweetId: match[2], postUrl: url.origin + url.pathname };
+        }
+      } catch (_) {}
+    }
+    return { username: fallbackUsername, tweetId: null, postUrl: window.location.href };
+  }
+
+  function findTwitterVideoForTweet(tweet) {
+    const video = tweet.querySelector('video');
+    const poster = video?.poster || video?.getAttribute('poster') || '';
+    const assetId = extractTwitterVideoAssetId(poster);
+    if (assetId && twitterVideoCandidates.has(assetId)) {
+      return { assetId, url: twitterVideoCandidates.get(assetId), poster: poster || null };
+    }
+
+    const directUrl = normalizeTwitterVideoUrl(video?.currentSrc || video?.src);
+    if (directUrl) {
+      const directAssetId = extractTwitterVideoAssetId(directUrl);
+      return { assetId: directAssetId, url: directUrl, poster: poster || null };
+    }
+
+    return null;
+  }
+
+  function scanTwitterMediaGrid(username) {
+    let found = 0;
+    const videoLinks = document.querySelectorAll(
+      'a[href*="/status/"][href*="/video/"]'
+    );
+
+    videoLinks.forEach((link) => {
+      const thumbnail = link.querySelector(
+        'img[src*="amplify_video_thumb"], ' +
+        'img[src*="ext_tw_video_thumb"], ' +
+        'img[src*="tweet_video_thumb"]'
+      );
+      const thumbnailUrl = resolveImageUrl(thumbnail);
+      const assetId = extractTwitterVideoAssetId(thumbnailUrl);
+      if (!assetId || !twitterVideoCandidates.has(assetId)) return;
+
+      const statusMatch = link.pathname.match(/^\/([^/]+)\/status\/(\d+)\/video\/\d+/i);
+      const postUrl = statusMatch
+        ? window.location.origin + '/' + statusMatch[1] + '/status/' + statusMatch[2]
+        : link.href;
+      const id = 'tw_video_' + assetId;
+      const videoItem = {
+        id,
+        media_type: 'Video',
+        url: twitterVideoCandidates.get(assetId),
+        thumbnail_url: thumbnailUrl?.replace(/name=\w+/, 'name=large') || null,
+        post_url: postUrl,
+        platform: 'twitter',
+        username,
+        content_type: 'video/mp4',
+      };
+      const existing = accumulatedMedia.find((item) => item.id === id);
+
+      if (existing) {
+        Object.assign(existing, videoItem);
+      } else {
+        accumulatedMedia.push(videoItem);
+        accumulatedSeen.add(id);
+        found++;
+      }
+    });
+
+    return found;
   }
 
   function scanTwitterDOM() {
     const username = extractUsername();
     let found = 0;
 
-    // Priority 1: Extract videos from script tags + HTML (regex search for video.twimg.com)
-    found += extractTwitterVideosFromHtml(username);
+    // X commonly exposes blob: video elements; resolve their real MP4 via resource timing.
+    collectTwitterVideoCandidates();
 
-    // Priority 2: Scan all tweet articles for images
+    // The /{username}/media route renders links and thumbnails, not tweet articles.
+    found += scanTwitterMediaGrid(username);
+
+    // Scan each tweet so videos retain the correct post URL and thumbnail.
     const tweetArticles = document.querySelectorAll('article[data-testid="tweet"]');
     tweetArticles.forEach((tweet) => {
-      const tweetLink = tweet.querySelector('a[href*="/status/"]');
-      const postUrl = tweetLink ? tweetLink.href : window.location.href;
+      const post = twitterPostInfo(tweet, username);
+      const postUrl = post.postUrl;
 
       const imgs = tweet.querySelectorAll('img[src*="pbs.twimg.com/media"], img[data-src*="pbs.twimg.com/media"]');
       imgs.forEach((img) => {
@@ -209,54 +321,34 @@
         }
       });
 
-      // Video poster — only if we don't have a real video URL for this tweet
-      const videoEls = tweet.querySelectorAll('video[poster]');
-      videoEls.forEach((video) => {
-        const poster = video.poster;
-        const alreadyHasVideo = accumulatedMedia.some(
-          (m) => m.media_type === 'Video' && m.post_url === postUrl
-        );
-        if (poster && !alreadyHasVideo && !accumulatedSeen.has(poster)) {
-          accumulatedSeen.add(poster);
-          accumulatedMedia.push({
-            id: 'tw_video_' + extractTwitterMediaId(poster),
-            media_type: 'Video',
-            url: poster.replace(/name=\w+/, 'name=large'),
-            thumbnail_url: poster,
-            post_url: postUrl,
-            platform: 'twitter',
-            username,
-            content_type: 'image/jpeg',
-          });
-          found++;
-        }
-      });
-    });
-
-    // Priority 3: DOM-level video source detection
-    const videoSources = document.querySelectorAll(
-      'video[src*="video.twimg.com"], source[src*="video.twimg.com"], ' +
-      'video[src*="tweet_video"], source[src*="tweet_video"]'
-    );
-    videoSources.forEach((el) => {
-      const src = el.src || el.getAttribute('src');
-      if (src && !accumulatedSeen.has(src)) {
-        accumulatedSeen.add(src);
-        accumulatedMedia.push({
-          id: 'tw_dom_' + src.split('/').pop().split('?')[0],
+      const resolvedVideo = findTwitterVideoForTweet(tweet);
+      if (resolvedVideo) {
+        const mediaKey = resolvedVideo.assetId || post.tweetId;
+        if (!mediaKey) return;
+        const id = 'tw_video_' + mediaKey;
+        const existing = accumulatedMedia.find((item) => item.id === id);
+        const videoItem = {
+          id,
           media_type: 'Video',
-          url: src,
-          thumbnail_url: null,
-          post_url: window.location.href,
+          url: resolvedVideo.url,
+          thumbnail_url: resolvedVideo.poster,
+          post_url: postUrl,
           platform: 'twitter',
           username,
           content_type: 'video/mp4',
-        });
-        found++;
+        };
+
+        if (existing) {
+          Object.assign(existing, videoItem);
+        } else {
+          accumulatedMedia.push(videoItem);
+          accumulatedSeen.add(id);
+          found++;
+        }
       }
     });
 
-    // Priority 4: All images on the page
+    // Catch images outside currently mounted tweet articles.
     const allImgs = document.querySelectorAll(
       'img[src*="pbs.twimg.com/media"], img[data-src*="pbs.twimg.com/media"]'
     );
@@ -484,7 +576,7 @@
     if (!isProfilePage()) return;
 
     // Set up page-context message listener (for JS runtime data)
-    setupPageMessageListener(extractUsername());
+    setupPageMessageListener();
 
     // Inject page script to read JS runtime variables (Twitter video URLs)
     requestPageScriptInjection();

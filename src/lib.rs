@@ -1,10 +1,10 @@
+pub mod downloader;
 pub mod models;
 pub mod platforms;
-pub mod downloader;
 pub mod utils;
 
+use models::{PlatformType, ProfileMedia};
 use wasm_bindgen::prelude::*;
-use models::{ProfileMedia, PlatformType};
 
 /// Parse a profile URL and return detected platform type.
 #[wasm_bindgen]
@@ -21,9 +21,8 @@ pub fn extract_media_from_html(platform: &str, html: &str, page_url: &str) -> St
     };
 
     match platform_type.extract_from_html(html, page_url) {
-        Ok(media) => serde_json::to_string(&media).unwrap_or_else(|e| {
-            format!(r#"{{"error":"Serialization failed: {}"}}"#, e)
-        }),
+        Ok(media) => serde_json::to_string(&media)
+            .unwrap_or_else(|e| format!(r#"{{"error":"Serialization failed: {}"}}"#, e)),
         Err(e) => format!(r#"{{"error":"{}"}}"#, e),
     }
 }
@@ -36,9 +35,8 @@ pub fn process_media_batch(json_input: &str) -> String {
         Err(e) => return format!(r#"{{"error":"Invalid input: {}"}}"#, e),
     };
     let processed = models::process_batch(media);
-    serde_json::to_string(&processed).unwrap_or_else(|e| {
-        format!(r#"{{"error":"Serialization failed: {}"}}"#, e)
-    })
+    serde_json::to_string(&processed)
+        .unwrap_or_else(|e| format!(r#"{{"error":"Serialization failed: {}"}}"#, e))
 }
 
 /// Initialize the WASM module (logging, config).

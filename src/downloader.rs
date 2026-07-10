@@ -23,8 +23,12 @@ impl DownloadManager {
     /// Generate a safe filename for a media item.
     pub fn generate_filename(media: &ProfileMedia) -> String {
         let ext = Self::get_extension(media);
-        let safe_username = media.username.replace(|c: char| !c.is_alphanumeric() && c != '_' && c != '-', "_");
-        let safe_id = media.id.replace(|c: char| !c.is_alphanumeric() && c != '_' && c != '-', "_");
+        let safe_username = media
+            .username
+            .replace(|c: char| !c.is_alphanumeric() && c != '_' && c != '-', "_");
+        let safe_id = media
+            .id
+            .replace(|c: char| !c.is_alphanumeric() && c != '_' && c != '-', "_");
         // Folder per user: {platform}_{username}/{id}.{ext}
         format!("{}_{}/{}.{}", media.platform, safe_username, safe_id, ext)
     }
@@ -82,11 +86,23 @@ mod tests {
         let media = sample_media(MediaType::Image, Some("image/jpeg"));
         let name = DownloadManager::generate_filename(&media);
         // Should contain folder separator
-        assert!(name.contains('/'), "Expected folder separator in filename: {}", name);
+        assert!(
+            name.contains('/'),
+            "Expected folder separator in filename: {}",
+            name
+        );
         let parts: Vec<&str> = name.split('/').collect();
         assert_eq!(parts.len(), 2, "Expected folder/file format, got: {}", name);
-        assert!(parts[0].starts_with("twitter_test_user"), "Folder should start with 'twitter_test_user', got: {}", parts[0]);
-        assert!(parts[1].ends_with(".jpg"), "File should end with .jpg, got: {}", parts[1]);
+        assert!(
+            parts[0].starts_with("twitter_test_user"),
+            "Folder should start with 'twitter_test_user', got: {}",
+            parts[0]
+        );
+        assert!(
+            parts[1].ends_with(".jpg"),
+            "File should end with .jpg, got: {}",
+            parts[1]
+        );
     }
 
     #[test]
@@ -131,7 +147,15 @@ mod tests {
         // Folder format: twitter_test_user/abc123.png
         let file_part = name.split('/').last().unwrap_or(&name);
         let folder_part = name.split('/').next().unwrap_or(&name);
-        assert!(folder_part.contains("user_name"), "Folder should contain sanitized username, got: {}", folder_part);
-        assert!(file_part.ends_with(".png"), "File should end with .png, got: {}", file_part);
+        assert!(
+            folder_part.contains("user_name"),
+            "Folder should contain sanitized username, got: {}",
+            folder_part
+        );
+        assert!(
+            file_part.ends_with(".png"),
+            "File should end with .png, got: {}",
+            file_part
+        );
     }
 }

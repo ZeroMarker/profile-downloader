@@ -43,13 +43,23 @@ async function injectVideoExtractor(tabId) {
     world: 'MAIN',
     func: () => {
       try {
-        const sources = [window.__INITIAL_STATE__, window.__NEXT_DATA__, window.__data];
+        const sources = [
+          window.__INITIAL_STATE__,
+          window.__NEXT_DATA__,
+          window.__data,
+          window.__PROFILE_DOWNLOADER_VIDEO_URLS__,
+        ];
+        performance.getEntriesByType('resource').forEach(function(entry) {
+          sources.push(entry.name);
+        });
         const videoUrls = [];
         const seen = new Set();
         sources.forEach(function(src) {
           if (!src) return;
-          var str = JSON.stringify(src);
-          var re = /https?:\/\/video\.twimg\.com\/[^\s"\)']+\.mp4/g;
+          var str = (typeof src === 'string' ? src : JSON.stringify(src))
+            .replace(/\\u002F/gi, '/')
+            .replace(/\\\//g, '/');
+          var re = /https?:\/\/video\.twimg\.com\/[^\s"<>']+?\.mp4(?:\?[^\s"<>']*)?/g;
           var m;
           while ((m = re.exec(str)) !== null) {
             if (!seen.has(m[0])) { seen.add(m[0]); videoUrls.push(m[0]); }
@@ -119,6 +129,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  * The `filename` parameter may include subdirectories: "user_folder/file.ext"
  */
 async function handleDownload(url, filename, retries = 1) {
+  validateDownloadUrl(url);
+
   // Split into folder and file parts (expected format: "user_folder/file.ext")
   const parts = (filename || 'media').split('/');
   const filePart = parts.pop() || 'media';
@@ -149,6 +161,24 @@ async function handleDownload(url, filename, retries = 1) {
       }
       throw err;
     }
+  }
+}
+
+function validateDownloadUrl(rawUrl) {
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch (_) {
+    throw new Error('Invalid media URL');
+  }
+
+  if (url.hostname !== 'video.twimg.com') return;
+  const path = url.pathname;
+  if (path.includes('/aud/') || /\/vid\/(?:avc1|hevc)\/\d+\/\d+\//i.test(path)) {
+    throw new Error('Incomplete X video stream detected; refresh the page and scan again');
+  }
+  if (/\/(?:init|segment|chunk)[^/]*\.mp4$/i.test(path)) {
+    throw new Error('Incomplete X video stream detected; refresh the page and scan again');
   }
 }
 

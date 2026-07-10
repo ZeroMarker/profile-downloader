@@ -116,8 +116,7 @@ fn parse_twitter_timestamp(s: &str) -> Option<i64> {
     }
     let year: i64 = parts.get(5)?.parse().ok()?;
     let months = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
     let month = months.iter().position(|&m| m == parts[1])? as i64;
     let day: i64 = parts[2].parse().ok()?;
@@ -133,8 +132,9 @@ fn parse_twitter_timestamp(s: &str) -> Option<i64> {
 
 /// Fallback: extract media URLs using regex on HTML.
 fn extract_from_html_regex(html: &str, username: &str) -> Result<Vec<ProfileMedia>, String> {
-    let img_re = Regex::new(r#"https?://pbs\.twimg\.com/media/[^\s"']+(?:\.(?:jpg|png|gif|webp))?"#)
-        .map_err(|e| format!("Regex error: {}", e))?;
+    let img_re =
+        Regex::new(r#"https?://pbs\.twimg\.com/media/[^\s"']+(?:\.(?:jpg|png|gif|webp))?"#)
+            .map_err(|e| format!("Regex error: {}", e))?;
     let video_re = Regex::new(r#"https?://video\.twimg\.com/[^\s"']+(?:\.mp4)?"#)
         .map_err(|e| format!("Regex error: {}", e))?;
 
