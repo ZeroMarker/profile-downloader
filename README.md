@@ -3,6 +3,7 @@
 > 一款基于 **Rust WASM** 驱动的 Chrome 扩展，一键下载 **X/Twitter、TikTok、Instagram** 个人主页的图片和视频。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/ZeroMarker/profile-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/ZeroMarker/profile-downloader/actions/workflows/ci.yml)
 
 ---
 
@@ -30,7 +31,7 @@
 cargo install wasm-pack
 
 # 2. 构建 WASM 核心库
-wasm-pack build --target web --out-dir wasm
+wasm-pack build --release --target web --out-dir extension/wasm
 
 # 3. 加载扩展
 # Chrome → chrome://extensions → 开启"开发者模式" → "加载已解压的扩展" → 选择 extension/ 目录
@@ -109,6 +110,17 @@ profile-downloader/
 3. 提交改动 (`git commit -am 'feat: add amazing feature'`)
 4. 推送到分支 (`git push origin feature/amazing`)
 5. 创建 Pull Request
+
+### 发布版本
+
+发布标签必须与 `extension/manifest.json` 中的版本一致：
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+GitHub Actions 会构建 WASM、打包扩展，并在对应 Release 中上传 ZIP 和 SHA-256 校验文件。
 
 ---
 

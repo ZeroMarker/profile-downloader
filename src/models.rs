@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::cmp::Reverse;
 
 /// Supported social media platforms.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -28,7 +29,7 @@ impl PlatformType {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "twitter" | "x" => Some(Self::Twitter),
             "tiktok" => Some(Self::TikTok),
@@ -131,7 +132,7 @@ pub fn process_batch(media: Vec<ProfileMedia>) -> Vec<ProfileMedia> {
         .into_iter()
         .filter(|m| seen.insert(m.id.clone()))
         .collect();
-    result.sort_by(|a, b| b.timestamp.unwrap_or(0).cmp(&a.timestamp.unwrap_or(0)));
+    result.sort_by_key(|item| Reverse(item.timestamp.unwrap_or(0)));
     result
 }
 
@@ -183,15 +184,12 @@ mod tests {
     }
 
     #[test]
-    fn test_from_str() {
-        assert_eq!(
-            PlatformType::from_str("twitter"),
-            Some(PlatformType::Twitter)
-        );
-        assert_eq!(PlatformType::from_str("x"), Some(PlatformType::Twitter));
-        assert_eq!(PlatformType::from_str("TIKTOK"), Some(PlatformType::TikTok));
-        assert_eq!(PlatformType::from_str("ig"), Some(PlatformType::Instagram));
-        assert_eq!(PlatformType::from_str("unknown"), None);
+    fn test_parse() {
+        assert_eq!(PlatformType::parse("twitter"), Some(PlatformType::Twitter));
+        assert_eq!(PlatformType::parse("x"), Some(PlatformType::Twitter));
+        assert_eq!(PlatformType::parse("TIKTOK"), Some(PlatformType::TikTok));
+        assert_eq!(PlatformType::parse("ig"), Some(PlatformType::Instagram));
+        assert_eq!(PlatformType::parse("unknown"), None);
     }
 
     fn sample_media(id: &str, ts: Option<i64>) -> ProfileMedia {

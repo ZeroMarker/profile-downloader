@@ -89,7 +89,7 @@ fn extract_tweet_media(tweet: &serde_json::Value, username: &str) -> Option<Vec<
                 .get("legacy")
                 .and_then(|l| l.get("created_at"))
                 .and_then(|t| t.as_str())
-                .and_then(|s| parse_twitter_timestamp(s)),
+                .and_then(parse_twitter_timestamp),
             file_size: None,
             content_type: Some(match media_type {
                 "video" => "video/mp4".to_string(),
@@ -126,7 +126,7 @@ fn parse_twitter_timestamp(s: &str) -> Option<i64> {
     let second: i64 = time_parts.get(2)?.parse().ok()?;
 
     // Simplified timestamp calculation (ignores timezone offset)
-    let days_since_epoch = (year - 1970) * 365 + month as i64 * 30 + day as i64;
+    let days_since_epoch = (year - 1970) * 365 + month * 30 + day;
     Some((days_since_epoch * 86400 + hour * 3600 + minute * 60 + second) * 1000)
 }
 

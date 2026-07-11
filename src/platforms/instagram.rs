@@ -94,7 +94,7 @@ fn extract_from_json_ld(html: &str, username: &str) -> Result<Vec<ProfileMedia>,
                             timestamp: val
                                 .get("datePublished")
                                 .and_then(|d| d.as_str())
-                                .and_then(|s| parse_instagram_date(s)),
+                                .and_then(parse_instagram_date),
                             file_size: None,
                             content_type: Some("image/jpeg".to_string()),
                         });

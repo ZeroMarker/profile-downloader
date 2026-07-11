@@ -15,7 +15,7 @@ pub fn detect_platform(url: &str) -> Option<String> {
 /// Extract media from a profile page HTML (called from content script).
 #[wasm_bindgen]
 pub fn extract_media_from_html(platform: &str, html: &str, page_url: &str) -> String {
-    let platform_type = match PlatformType::from_str(platform) {
+    let platform_type = match PlatformType::parse(platform) {
         Some(p) => p,
         None => return r#"{"error":"Unknown platform"}"#.to_string(),
     };

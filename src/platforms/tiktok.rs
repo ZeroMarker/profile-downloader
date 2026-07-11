@@ -63,7 +63,7 @@ fn extract_from_json_ld(html: &str, username: &str) -> Result<Vec<ProfileMedia>,
                                 timestamp: video
                                     .get("uploadDate")
                                     .and_then(|d| d.as_str())
-                                    .and_then(|s| parse_tiktok_date(s)),
+                                    .and_then(parse_tiktok_date),
                                 file_size: None,
                                 content_type: Some("video/mp4".to_string()),
                             });

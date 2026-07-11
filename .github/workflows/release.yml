@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build extension release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Configure Rust
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup component add rustfmt clippy
+
+      - name: Verify release version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          manifest_version="$(node -p "require('./extension/manifest.json').version")"
+          if [ "$tag_version" != "$manifest_version" ]; then
+            echo "Tag version $tag_version does not match manifest version $manifest_version" >&2
+            exit 1
+          fi
+
+      - name: Run Rust quality checks
+        run: |
+          cargo fmt -- --check
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Check extension JavaScript
+        run: |
+          node --check extension/background.js
+          node --check extension/content_script.js
+          node --check extension/popup.js
+          node --check extension/twitter_video_interceptor.js
+          node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json', 'utf8'))"
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+
+      - name: Build WASM
+        run: wasm-pack build --release --target web --out-dir extension/wasm --locked
+
+      - name: Package extension
+        run: |
+          mkdir -p dist
+          archive="profile-downloader-${GITHUB_REF_NAME}.zip"
+          cd extension
+          zip -r "../dist/$archive" .
+          cd ../dist
+          sha256sum "$archive" > "$archive.sha256"
+
+      - name: Verify package contents
+        run: |
+          archive="dist/profile-downloader-${GITHUB_REF_NAME}.zip"
+          unzip -t "$archive"
+          unzip -l "$archive" | grep -F "manifest.json"
+          unzip -l "$archive" | grep -F "wasm/profile_downloader_core.js"
+          unzip -l "$archive" | grep -F "wasm/profile_downloader_core_bg.wasm"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          archive="dist/profile-downloader-${GITHUB_REF_NAME}.zip"
+          checksum="$archive.sha256"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$archive" "$checksum" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$archive" "$checksum" \
+              --verify-tag \
+              --generate-notes \
+              --title "Profile Downloader $GITHUB_REF_NAME"
+          fi

@@ -102,6 +102,13 @@ function sendMessageWithTimeout(tabId, message, timeoutMs = 5000) {
   });
 }
 
+function isRecoverableContentScriptError(err) {
+  const message = err?.message || '';
+  return message.includes('Could not establish connection')
+    || message.includes('Receiving end does not exist')
+    || message.includes('Content script did not respond (timeout)');
+}
+
 /**
  * Initialize the popup — detect current tab and platform.
  * WASM is loaded in the background and never blocks the UI.
@@ -186,12 +193,10 @@ async function init() {
       showError('No media found on this page. Try scrolling down to load more content.');
     }
   } catch (err) {
-    console.error('[ProfileDownloader] Init error:', err);
-
-    if (err.message?.includes('Could not establish connection') ||
-        err.message?.includes('timeout')) {
-      showError('Cannot connect to the page. Please refresh and try again.');
+    if (isRecoverableContentScriptError(err)) {
+      showError('Extension was updated. Refresh this page once, then open the extension again.');
     } else {
+      console.error('[ProfileDownloader] Init error:', err);
       showError(err.message || 'Failed to initialize.');
     }
   }

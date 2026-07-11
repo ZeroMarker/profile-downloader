@@ -145,7 +145,7 @@ mod tests {
         media.username = "user@name!".to_string();
         let name = DownloadManager::generate_filename(&media);
         // Folder format: twitter_test_user/abc123.png
-        let file_part = name.split('/').last().unwrap_or(&name);
+        let file_part = name.split('/').next_back().unwrap_or(&name);
         let folder_part = name.split('/').next().unwrap_or(&name);
         assert!(
             folder_part.contains("user_name"),
