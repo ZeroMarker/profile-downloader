@@ -58,6 +58,15 @@
     },
     {
       "matches": [
+        "https://instagram.com/*",
+        "https://www.instagram.com/*"
+      ],
+      "js": ["instagram_media_interceptor.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
         "https://twitter.com/*",
         "https://x.com/*",
         "https://www.tiktok.com/*",

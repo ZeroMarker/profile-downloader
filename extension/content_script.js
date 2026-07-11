@@ -198,6 +198,8 @@
           source: 'profile-downloader',
           type: 'tiktok-video-request',
         }, '*');
+      } else if (platform === 'instagram') {
+        window.postMessage({ source: 'profile-downloader', type: 'instagram-media-request' }, '*');
       }
     } catch(_) {}
   }
@@ -248,6 +250,32 @@
         }).catch((err) => {
           pending.reject(err);
         });
+      }
+      if (event.source === window
+          && event.data?.source === 'profile-downloader'
+          && event.data?.type === 'instagram-media') {
+        const username = extractUsername();
+        let found = 0;
+        (event.data.items || []).forEach((item) => {
+          if (item.ownerUsername?.toLowerCase() !== username.toLowerCase()) return;
+          const postUrl = `https://www.instagram.com/${username}/${item.kind || 'p'}/${item.code}/`;
+          accumulatedMedia = accumulatedMedia.filter((existing) => {
+            try {
+              return new URL(existing.post_url).pathname !== new URL(postUrl).pathname
+                || existing.id.startsWith(`ig_${item.code}_`);
+            } catch (_) {
+              return true;
+            }
+          });
+          (item.media || []).forEach((media, index) => {
+            const id = `ig_${item.code}_${index}`;
+            if (!media.url || accumulatedSeen.has(id)) return;
+            accumulatedSeen.add(id);
+            accumulatedMedia.push({ id, media_type: media.type === 'video' ? 'Video' : 'Image', url: media.url, thumbnail_url: media.thumbnail || (media.type === 'image' ? media.url : null), post_url: postUrl, platform: 'instagram', username, caption: item.caption || null, content_type: media.type === 'video' ? 'video/mp4' : 'image/jpeg' });
+            found++;
+          });
+        });
+        if (found > 0) console.log('[ProfileDownloader] Captured', found, 'Instagram media item(s)');
       }
     });
   }
@@ -691,6 +719,27 @@
 
   // ===== Instagram =====
 
+  function isInstagramItemFromProfile(item, username) {
+    const owner = item?.user?.username
+      || item?.owner?.username
+      || item?.owner?.user?.username;
+    return !owner || owner.toLowerCase() === username.toLowerCase();
+  }
+
+  function instagramPostLinkForImage(img, username) {
+    const link = img.closest('a[href]');
+    if (!link) return null;
+    try {
+      const url = new URL(link.href, window.location.origin);
+      const match = url.pathname.match(/^\/([^/]+)\/(?:p|reel)\/[^/?#]+\/?$/i);
+      return match && match[1].toLowerCase() === username.toLowerCase()
+        ? url.href
+        : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   function scanInstagramDOM() {
     const username = extractUsername();
     let found = 0;
@@ -702,18 +751,22 @@
         const data = JSON.parse(match[1]);
         const items = data?.items || data?.feed?.items || data?.profile?.items || [];
         items.forEach((item) => {
+          if (!isInstagramItemFromProfile(item, username)) return;
           const id = 'ig_' + (item.code || item.id);
           if (accumulatedSeen.has(id)) return;
           accumulatedSeen.add(id);
 
           if (item.carousel_media) {
-            const urls = item.carousel_media
-              .map((cm) => cm.image_versions2?.candidates?.[0]?.url)
-              .filter(Boolean);
-            if (urls.length > 0) {
-              accumulatedMedia.push({ id, media_type: 'Image', url: urls[0], carousel_urls: urls, thumbnail_url: null, post_url: 'https://instagram.com/p/' + item.code, platform: 'instagram', username, caption: item.caption?.text || item.caption || null, content_type: 'image/jpeg' });
+            item.carousel_media.forEach((cm, index) => {
+              const imageUrl = cm.image_versions2?.candidates?.[0]?.url;
+              const videoUrl = cm.video_versions?.[0]?.url;
+              const url = videoUrl || imageUrl;
+              const childId = `${id}_${index}`;
+              if (!url || accumulatedSeen.has(childId)) return;
+              accumulatedSeen.add(childId);
+              accumulatedMedia.push({ id: childId, media_type: videoUrl ? 'Video' : 'Image', url, thumbnail_url: imageUrl || null, post_url: 'https://instagram.com/' + username + '/p/' + item.code, platform: 'instagram', username, caption: item.caption?.text || item.caption || null, content_type: videoUrl ? 'video/mp4' : 'image/jpeg' });
               found++;
-            }
+            });
           } else {
             const url = item.image_versions2?.candidates?.[0]?.url || item.display_url || item.display_src;
             if (url) {
@@ -726,16 +779,18 @@
       }
     } catch (_) {}
 
+    // Profile post thumbnails are linked to /p/ or /reel/. Scanning every CDN
+    // image also captures the signed-in user's avatar, comment avatars, story
+    // rings, recommendations, and the profile avatar itself.
     const imgs = document.querySelectorAll(
-      'img[src*="cdninstagram.com"], img[data-src*="cdninstagram.com"], ' +
-      'img[src*="fbcdn.net"], img[data-src*="fbcdn.net"], ' +
-      'img[src*="scontent"], img[data-src*="scontent"]'
+      'a[href*="/p/"] img, a[href*="/reel/"] img'
     );
     imgs.forEach((img) => {
       const src = resolveImageUrl(img);
-      if (!src || src.includes('profile_pic') || accumulatedSeen.has(src)) return;
+      const postUrl = instagramPostLinkForImage(img, username);
+      if (!src || !postUrl || src.includes('profile_pic') || accumulatedSeen.has(src)) return;
       accumulatedSeen.add(src);
-      accumulatedMedia.push({ id: 'ig_' + src.split('/').pop().split('?')[0], media_type: 'Image', url: src, thumbnail_url: src, post_url: window.location.href, platform: 'instagram', username, content_type: 'image/jpeg' });
+      accumulatedMedia.push({ id: 'ig_' + src.split('/').pop().split('?')[0], media_type: 'Image', url: src, thumbnail_url: src, post_url: postUrl, platform: 'instagram', username, content_type: 'image/jpeg' });
       found++;
     });
 
