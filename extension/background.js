@@ -39,11 +39,22 @@ async function loadDownloadQueueState() {
   if (!state) return;
 
   downloadQueueState = {
-    pending: Array.isArray(state.pending) ? state.pending : [],
+    pending: Array.isArray(state.pending)
+      ? state.pending.filter((item) => !isTikTokWebEndpoint(item?.url))
+      : [],
     active: state.active && typeof state.active === 'object' ? state.active : {},
     completed: Number(state.completed) || 0,
     failed: Number(state.failed) || 0,
   };
+}
+
+function isTikTokWebEndpoint(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    return url.hostname === 'www.tiktok.com' || url.hostname === 'tiktok.com';
+  } catch (_) {
+    return false;
+  }
 }
 
 async function persistDownloadQueue() {
@@ -120,6 +131,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           console.error('[ProfileDownloader] Batch download error:', err);
           sendResponse({ success: false, error: err.message || 'Batch download failed' });
         });
+      return true;
+
+    case 'downloadPreparedMedia':
+      startPreparedDownload(request.item)
+        .then((downloadId) => sendResponse({ success: true, downloadId }))
+        .catch((err) => sendResponse({ success: false, error: err.message || 'Download failed' }));
       return true;
 
     case 'getDownloadQueueStatus':
@@ -241,6 +258,20 @@ async function enqueueDownloadBatch(items) {
   };
 }
 
+async function startPreparedDownload(item) {
+  if (!item?.url || !item?.filename) throw new Error('Invalid prepared download');
+  await downloadQueueLoaded;
+  const downloadId = await handleDownload(item.url, item.filename);
+  downloadQueueState.active[String(downloadId)] = {
+    id: item.id,
+    url: item.url,
+    filename: item.filename,
+    prepared: true,
+  };
+  await persistDownloadQueue();
+  return downloadId;
+}
+
 async function getDownloadQueueStatus() {
   await downloadQueueLoaded;
   return {
@@ -315,6 +346,10 @@ function validateDownloadUrl(rawUrl) {
     url = new URL(rawUrl);
   } catch (_) {
     throw new Error('Invalid media URL');
+  }
+
+  if (isTikTokWebEndpoint(url.href)) {
+    throw new Error('TikTok web endpoint is not a direct CDN video URL; refresh the page and scan again');
   }
 
   if (url.hostname !== 'video.twimg.com') return;

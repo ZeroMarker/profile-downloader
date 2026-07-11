@@ -19,6 +19,9 @@
   let observer = null;
   let scanTimer = null;
   const twitterVideoCandidates = new Map();
+  const tiktokVideoCandidates = new Map();
+  const tiktokResolutionTasks = new Map();
+  const tiktokDownloadRequests = new Map();
 
   function detectPlatform() {
     const host = window.location.hostname.toLowerCase();
@@ -190,6 +193,12 @@
   function requestPageScriptInjection() {
     try {
       chrome.runtime.sendMessage({ action: 'injectVideoExtractor' });
+      if (platform === 'tiktok') {
+        window.postMessage({
+          source: 'profile-downloader',
+          type: 'tiktok-video-request',
+        }, '*');
+      }
     } catch(_) {}
   }
   function setupPageMessageListener() {
@@ -204,6 +213,41 @@
           scanTwitterDOM();
           console.log('[ProfileDownloader] Injected script found', found, 'video variant(s)');
         }
+      }
+      if (event.data && event.data.source === 'profile-downloader' && event.data.type === 'tiktok-videos') {
+        var videos = event.data.videos || [];
+        videos.forEach(function(video) {
+          var url = normalizeTikTokVideoUrl(video.url);
+          if (video.id && url) tiktokVideoCandidates.set(String(video.id), url);
+        });
+        if (videos.length > 0) {
+          scanTikTokDOM();
+          console.log('[ProfileDownloader] Captured', videos.length, 'TikTok video URL(s)');
+        }
+      }
+      if (event.source === window
+          && event.data?.source === 'profile-downloader'
+          && event.data?.type === 'tiktok-download-result') {
+        const pending = tiktokDownloadRequests.get(event.data.requestId);
+        if (!pending) return;
+        tiktokDownloadRequests.delete(event.data.requestId);
+        if (!event.data.success || !event.data.blobUrl) {
+          pending.reject(new Error(event.data.error || 'TikTok download failed'));
+          return;
+        }
+        chrome.runtime.sendMessage({
+          action: 'downloadPreparedMedia',
+          item: {
+            id: pending.item.id,
+            url: event.data.blobUrl,
+            filename: pending.item.filename,
+          },
+        }).then((response) => {
+          if (!response?.success) throw new Error(response?.error || 'Could not start TikTok download');
+          pending.resolve(response);
+        }).catch((err) => {
+          pending.reject(err);
+        });
       }
     });
   }
@@ -386,9 +430,145 @@
 
   // ===== TikTok =====
 
+  function normalizeTikTokVideoUrl(rawUrl) {
+    const candidate = Array.isArray(rawUrl) ? rawUrl[0] : rawUrl;
+    if (!candidate || typeof candidate !== 'string') return null;
+
+    const decoded = candidate
+      .replace(/\\u002F/gi, '/')
+      .replace(/\\\//g, '/')
+      .replace(/&amp;/gi, '&');
+
+    try {
+      const url = new URL(decoded);
+      if (!['http:', 'https:'].includes(url.protocol)) return null;
+      if (/\/@[^/]+\/video\/\d+/.test(url.pathname)) return null;
+      return url.href;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function bestTikTokVideoUrl(candidates) {
+    const urls = [];
+    function add(value) {
+      if (Array.isArray(value)) {
+        value.forEach(add);
+        return;
+      }
+      const url = normalizeTikTokVideoUrl(value);
+      if (url && !urls.includes(url)) urls.push(url);
+    }
+    candidates.forEach(add);
+
+    function score(rawUrl) {
+      const url = new URL(rawUrl);
+      let value = 0;
+      if (url.hostname !== 'www.tiktok.com' && url.hostname !== 'tiktok.com') value += 100;
+      if (/\/(?:video\/tos|obj\/tos|tos-)/i.test(url.pathname)) value += 50;
+      if (/mime_type=video|video_mp4/i.test(url.search)) value += 20;
+      if (/\/aweme\/v\d+\/play|\/player\/v\d+/i.test(url.pathname)) value -= 100;
+      return value;
+    }
+
+    return urls.sort((a, b) => score(b) - score(a))[0] || null;
+  }
+
+  function collectTikTokVideoCandidates() {
+    function remember(item) {
+      if (!item || typeof item !== 'object') return;
+      const video = item.video || item.itemStruct?.video;
+      const itemId = String(item.id || item.aweme_id || item.itemStruct?.id || '');
+      if (!video || !itemId) return;
+
+      const candidates = [
+        video.playAddr,
+        video.downloadAddr,
+        video.play_addr?.url_list,
+        video.download_addr?.url_list,
+        video.bitRate?.[0]?.playAddr?.UrlList,
+        video.bitrateInfo?.[0]?.PlayAddr?.UrlList,
+      ];
+      const url = bestTikTokVideoUrl(candidates);
+      if (url) {
+        tiktokVideoCandidates.set(itemId, url);
+      }
+    }
+
+    function walk(value, visited = new Set()) {
+      if (!value || typeof value !== 'object' || visited.has(value)) return;
+      visited.add(value);
+      remember(value);
+      Object.values(value).forEach((child) => walk(child, visited));
+    }
+
+    document.querySelectorAll('script').forEach((script) => {
+      const text = script.textContent?.trim();
+      if (!text || (!text.includes('playAddr') && !text.includes('play_addr'))) return;
+      try {
+        walk(JSON.parse(text));
+      } catch (_) {}
+    });
+
+    return tiktokVideoCandidates.size;
+  }
+
+  function resolveTikTokPost(videoId, postUrl) {
+    if (tiktokVideoCandidates.has(videoId)) return Promise.resolve(true);
+    if (tiktokResolutionTasks.has(videoId)) return tiktokResolutionTasks.get(videoId);
+
+    const task = (async () => {
+      try {
+        const endpoint = new URL('/api/item/detail/', window.location.origin);
+        endpoint.searchParams.set('itemId', videoId);
+        const response = await fetch(endpoint.href, {
+          credentials: 'include',
+          headers: { accept: 'application/json' },
+        });
+        if (!response.ok) return false;
+        const payload = await response.json();
+
+        let matched = false;
+        const visited = new Set();
+        function walk(value) {
+          if (!value || typeof value !== 'object' || visited.has(value) || matched) return;
+          visited.add(value);
+          const item = value.itemStruct || value;
+          const id = String(item.id || item.aweme_id || item.awemeId || '');
+          if (id === videoId && item.video) {
+            const candidates = [
+              item.video.playAddr,
+              item.video.downloadAddr,
+              item.video.play_addr?.url_list,
+              item.video.download_addr?.url_list,
+              item.video.bitRate?.[0]?.playAddr?.UrlList,
+              item.video.bitrateInfo?.[0]?.PlayAddr?.UrlList,
+            ];
+            const url = bestTikTokVideoUrl(candidates);
+            if (url) {
+              tiktokVideoCandidates.set(videoId, url);
+              matched = true;
+            }
+          }
+          Object.values(value).forEach(walk);
+        }
+        walk(payload);
+        return matched;
+      } catch (err) {
+        console.warn('[ProfileDownloader] Could not resolve TikTok post', postUrl, err);
+        return false;
+      }
+    })().finally(() => tiktokResolutionTasks.delete(videoId));
+
+    tiktokResolutionTasks.set(videoId, task);
+    return task;
+  }
+
   function scanTikTokDOM() {
     const username = extractUsername();
     let found = 0;
+
+    collectTikTokVideoCandidates();
 
     try {
       const html = document.documentElement.innerHTML;
@@ -399,7 +579,12 @@
         if (itemModule) {
           Object.values(itemModule).forEach((item) => {
             const video = item.video;
-            const videoUrl = video?.playAddr?.[0] || video?.downloadAddr?.[0];
+            const videoUrl = bestTikTokVideoUrl([
+              video?.bitRate?.[0]?.playAddr?.UrlList,
+              video?.bitrateInfo?.[0]?.PlayAddr?.UrlList,
+              video?.playAddr,
+              video?.downloadAddr,
+            ]);
             if (videoUrl && !accumulatedSeen.has(item.id)) {
               accumulatedSeen.add(item.id);
               accumulatedMedia.push({
@@ -425,12 +610,21 @@
       const href = link.href;
       const match = href.match(/\/video\/(\d+)/);
       if (match && !accumulatedSeen.has(match[1])) {
+        const videoUrl = tiktokVideoCandidates.get(match[1]);
+        // A TikTok post URL returns HTML. Only expose an item when the
+        // embedded page state gives us a real CDN media URL.
+        if (!videoUrl) {
+          resolveTikTokPost(match[1], href).then((resolved) => {
+            if (resolved) debouncedScan();
+          });
+          return;
+        }
         accumulatedSeen.add(match[1]);
         const thumb = link.querySelector('img');
         accumulatedMedia.push({
           id: 'tt_' + match[1],
           media_type: 'Video',
-          url: href,
+          url: videoUrl,
           thumbnail_url: thumb?.src || null,
           post_url: href,
           platform: 'tiktok',
@@ -451,6 +645,48 @@
     const avatarEl = document.querySelector('img[data-e2e="user-avatar"]');
     if (avatarEl) info.avatar_url = avatarEl.src;
     return info;
+  }
+
+  function downloadTikTokInPage(item) {
+    return new Promise((resolve, reject) => {
+      const requestId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const timer = setTimeout(() => {
+        tiktokDownloadRequests.delete(requestId);
+        reject(new Error('TikTok video fetch timed out'));
+      }, 60000);
+      tiktokDownloadRequests.set(requestId, {
+        item,
+        resolve: (value) => { clearTimeout(timer); resolve(value); },
+        reject: (error) => { clearTimeout(timer); reject(error); },
+      });
+      window.postMessage({
+        source: 'profile-downloader',
+        type: 'tiktok-download-request',
+        requestId,
+        url: item.url,
+        filename: item.filename,
+      }, '*');
+    });
+  }
+
+  async function downloadTikTokBatch(items) {
+    const errors = [];
+    let downloaded = 0;
+    for (const item of items) {
+      try {
+        await downloadTikTokInPage(item);
+        downloaded++;
+      } catch (err) {
+        errors.push({ id: item.id, error: err.message || 'Download failed' });
+      }
+    }
+    return {
+      success: downloaded > 0,
+      queued: downloaded,
+      failed: errors.length,
+      errors: errors.slice(0, 10),
+      error: downloaded === 0 ? (errors[0]?.error || 'No TikTok videos could be downloaded') : undefined,
+    };
   }
 
   // ===== Instagram =====
@@ -593,8 +829,16 @@
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'extractMedia') {
-      try {
+      (async () => {
+        try {
         scanDOM();
+        if (platform === 'tiktok' && tiktokResolutionTasks.size > 0) {
+          await Promise.race([
+            Promise.allSettled(Array.from(tiktokResolutionTasks.values())),
+            new Promise((resolve) => setTimeout(resolve, 12000)),
+          ]);
+          scanDOM();
+        }
         const seen = new Set();
         const deduped = accumulatedMedia.filter((m) => {
           if (seen.has(m.id)) return false;
@@ -608,10 +852,15 @@
           profileInfo: getProfileInfo(),
           totalScanned: accumulatedMedia.length,
         });
-      } catch (err) {
-        console.error('[ProfileDownloader] Extraction error:', err);
-        sendResponse({ error: err.message || 'Extraction failed' });
-      }
+        } catch (err) {
+          console.error('[ProfileDownloader] Extraction error:', err);
+          sendResponse({ error: err.message || 'Extraction failed' });
+        }
+      })();
+    } else if (request.action === 'downloadTikTokBatch') {
+      downloadTikTokBatch(Array.isArray(request.items) ? request.items : [])
+        .then(sendResponse)
+        .catch((err) => sendResponse({ success: false, error: err.message }));
     }
     return true;
   });

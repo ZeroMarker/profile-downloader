@@ -12,11 +12,13 @@ let wasm = null;
 // State
 let state = {
   platform: null,
+  tabId: null,
   username: null,
   mediaItems: [],
   selectedIds: new Set(),
   isDownloading: false,
   wasmReady: false,
+  monitorTimer: null,
 };
 
 // DOM refs
@@ -152,6 +154,7 @@ async function init() {
     }
 
     state.platform = platform;
+    state.tabId = tab.id;
 
     // Show platform badge immediately
     const badges = {
@@ -176,7 +179,7 @@ async function init() {
     const response = await sendMessageWithTimeout(tab.id, {
       action: 'extractMedia',
       platform: state.platform,
-    });
+    }, state.platform === 'tiktok' ? 15000 : 5000);
 
     if (response?.error) {
       showError(response.error);
@@ -189,6 +192,7 @@ async function init() {
       state.username = response.username;
       renderProfile(response.profileInfo);
       renderMediaList(state.mediaItems);
+      await restoreDownloadState();
     } else {
       showError('No media found on this page. Try scrolling down to load more content.');
     }
@@ -200,6 +204,43 @@ async function init() {
       showError(err.message || 'Failed to initialize.');
     }
   }
+}
+
+async function restoreDownloadState() {
+  try {
+    const status = await chrome.runtime.sendMessage({ action: 'getDownloadQueueStatus' });
+    if ((status?.pending || 0) + (status?.active || 0) === 0) return;
+    state.isDownloading = true;
+    $('#download-all-btn').disabled = true;
+    $('#download-selected-btn').disabled = true;
+    $('#select-all-btn').disabled = true;
+    sections.progress.classList.remove('hidden');
+    $('#progress-fill').style.width = '70%';
+    $('#progress-text').textContent = `${status.pending || 0} queued, ${status.active || 0} downloading`;
+    monitorDownloads();
+  } catch (_) {}
+}
+
+function monitorDownloads() {
+  if (state.monitorTimer) return;
+  state.monitorTimer = setInterval(async () => {
+    try {
+      const status = await chrome.runtime.sendMessage({ action: 'getDownloadQueueStatus' });
+      const remaining = (status?.pending || 0) + (status?.active || 0);
+      if (remaining > 0) {
+        $('#progress-text').textContent = `${status.pending || 0} queued, ${status.active || 0} downloading`;
+        return;
+      }
+      clearInterval(state.monitorTimer);
+      state.monitorTimer = null;
+      state.isDownloading = false;
+      $('#download-all-btn').disabled = false;
+      $('#select-all-btn').disabled = false;
+      $('#progress-fill').style.width = '100%';
+      $('#progress-text').textContent = 'Downloads complete';
+      updateDownloadButton();
+    } catch (_) {}
+  }, 1000);
 }
 
 /**
@@ -249,14 +290,20 @@ function renderMediaList(media) {
       const thumb = item.thumbnail_url || item.url;
       return `
         <div class="media-item" data-index="${index}" data-id="${item.id}">
-          <img src="${thumb}" alt="media" loading="lazy"
-            onerror="this.style.display='none';this.parentElement.classList.add('broken')" />
+          <img src="${thumb}" alt="media" loading="lazy" class="media-thumbnail" />
           <span class="media-type-badge">${isVideo ? '🎬' : '🖼️'}</span>
           <span class="checkbox-overlay"></span>
         </div>
       `;
     })
     .join('');
+
+  grid.querySelectorAll('.media-thumbnail').forEach((img) => {
+    img.addEventListener('error', () => {
+      img.style.display = 'none';
+      img.parentElement?.classList.add('broken');
+    }, { once: true });
+  });
 
   // Click to toggle selection
   grid.querySelectorAll('.media-item').forEach((el) => {
@@ -318,14 +365,20 @@ async function startDownload(selectedOnly) {
   text.textContent = `Adding ${items.length} files to Chrome downloads...`;
 
   try {
-    const response = await chrome.runtime.sendMessage({
-      action: 'downloadBatch',
-      items: items.map((item) => ({
-        id: item.id,
-        url: item.url,
-        filename: generateFilename(item),
-      })),
-    });
+    const downloadItems = items.map((item) => ({
+      id: item.id,
+      url: item.url,
+      filename: generateFilename(item),
+    }));
+    const response = state.platform === 'tiktok'
+      ? await chrome.tabs.sendMessage(state.tabId, {
+          action: 'downloadTikTokBatch',
+          items: downloadItems,
+        })
+      : await chrome.runtime.sendMessage({
+          action: 'downloadBatch',
+          items: downloadItems,
+        });
     if (!response || response.error) {
       throw new Error(response?.error || 'Could not start batch download');
     }
@@ -340,11 +393,17 @@ async function startDownload(selectedOnly) {
     text.textContent = `Download failed: ${err.message || 'Unknown error'}`;
   }
 
-  state.isDownloading = false;
-
-  $('#download-all-btn').disabled = false;
-  $('#select-all-btn').disabled = false;
-  updateDownloadButton();
+  const queueStatus = await chrome.runtime.sendMessage({ action: 'getDownloadQueueStatus' });
+  if ((queueStatus?.pending || 0) + (queueStatus?.active || 0) > 0) {
+    state.isDownloading = true;
+    text.textContent = `${queueStatus.pending || 0} queued, ${queueStatus.active || 0} downloading`;
+    monitorDownloads();
+  } else {
+    state.isDownloading = false;
+    $('#download-all-btn').disabled = false;
+    $('#select-all-btn').disabled = false;
+    updateDownloadButton();
+  }
 }
 
 /**

@@ -101,9 +101,7 @@ fn extract_from_sigi_state(html: &str, username: &str) -> Result<Vec<ProfileMedi
                             if let Some(url) = video
                                 .get("playAddr")
                                 .or_else(|| video.get("downloadAddr"))
-                                .and_then(|a| a.as_array())
-                                .and_then(|a| a.first())
-                                .and_then(|u| u.as_str())
+                                .and_then(first_url)
                             {
                                 let id = item.get("id").and_then(|i| i.as_str()).unwrap_or(url);
                                 let id = utils::generate_media_id("tiktok", username, id);
@@ -163,40 +161,34 @@ fn parse_tiktok_date(s: &str) -> Option<i64> {
     Some((days * 86400 + hour * 3600 + min * 60 + sec) * 1000)
 }
 
+fn first_url(value: &serde_json::Value) -> Option<&str> {
+    value
+        .as_str()
+        .or_else(|| value.as_array()?.first()?.as_str())
+        .filter(|url| !url.contains("tiktok.com/@"))
+}
+
 /// Fallback regex extraction for TikTok.
-fn extract_from_html_regex(html: &str, username: &str) -> Result<Vec<ProfileMedia>, String> {
+fn extract_from_html_regex(html: &str, _username: &str) -> Result<Vec<ProfileMedia>, String> {
     let re = Regex::new(r#"(?:https?://[^\s"']*?tiktok\.com[^\s"']*?video/(\d+)[^\s"']*)"#)
         .map_err(|e| format!("Regex error: {}", e))?;
 
-    let mut items = Vec::new();
+    let mut video_ids = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
     for cap in re.captures_iter(html) {
         let video_id = cap.get(1).map(|m| m.as_str()).unwrap_or("");
         if seen.insert(video_id.to_string()) {
-            let id = utils::generate_media_id("tiktok", username, video_id);
-            items.push(ProfileMedia {
-                id,
-                media_type: MediaType::Video,
-                url: format!("https://www.tiktok.com/@{}/video/{}", username, video_id),
-                thumbnail_url: None,
-                post_url: format!("https://www.tiktok.com/@{}/video/{}", username, video_id),
-                platform: "tiktok".to_string(),
-                username: username.to_string(),
-                caption: None,
-                timestamp: None,
-                file_size: None,
-                content_type: Some("video/mp4".to_string()),
-            });
+            video_ids.push(video_id.to_string());
         }
-        if items.len() >= 50 {
+        if video_ids.len() >= 50 {
             break;
         }
     }
 
-    if items.is_empty() {
+    if video_ids.is_empty() {
         Err("No TikTok media found via regex".to_string())
     } else {
-        Ok(items)
+        Err("TikTok post links were found, but no direct video URLs were available".to_string())
     }
 }
