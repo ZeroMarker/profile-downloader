@@ -1,0 +1,28 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        {
+          "header": "Referer",
+          "operation": "set",
+          "value": "https://weibo.com/"
+        }
+      ]
+    },
+    "condition": {
+      "requestDomains": [
+        "sinaimg.cn",
+        "weibocdn.com"
+      ],
+      "resourceTypes": [
+        "image",
+        "media",
+        "xmlhttprequest",
+        "other"
+      ]
+    }
+  }
+]

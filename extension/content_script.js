@@ -22,6 +22,7 @@
   const tiktokVideoCandidates = new Map();
   const tiktokResolutionTasks = new Map();
   const tiktokDownloadRequests = new Map();
+  let onlyFansResolutionRunning = false;
 
   function detectPlatform() {
     const host = window.location.hostname.toLowerCase();
@@ -32,16 +33,22 @@
       if (html.includes('twitter.com') || html.includes('x.com')) return 'twitter';
       if (html.includes('tiktok.com')) return 'tiktok';
       if (html.includes('instagram.com')) return 'instagram';
+      if (html.includes('onlyfans.com')) return 'onlyfans';
+      if (html.includes('weibo.com')) return 'weibo';
       // Check page title
       const title = document.title.toLowerCase();
       if (title.includes('x') || title.includes('twitter')) return 'twitter';
       if (title.includes('tiktok')) return 'tiktok';
       if (title.includes('instagram')) return 'instagram';
+      if (title.includes('onlyfans')) return 'onlyfans';
+      if (title.includes('微博') || title.includes('weibo')) return 'weibo';
       return null;
     }
     if (isHost('twitter.com') || isHost('x.com')) return 'twitter';
     if (isHost('tiktok.com')) return 'tiktok';
     if (isHost('instagram.com')) return 'instagram';
+    if (isHost('onlyfans.com')) return 'onlyfans';
+    if (isHost('weibo.com')) return 'weibo';
     return null;
   }
 
@@ -61,7 +68,11 @@
       return 'exported_page';
     }
     const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
-    const firstSegment = path.split('/')[0] || '';
+    const segments = path.split('/').filter(Boolean);
+    if (platform === 'weibo' && ['u', 'n'].includes(segments[0]?.toLowerCase())) {
+      return (segments[1] || '').replace(/^@/, '');
+    }
+    const firstSegment = segments[0] || '';
     return firstSegment.replace(/^@/, '');
   }
 
@@ -73,7 +84,11 @@
     const excluded = ['home', 'explore', 'notifications', 'messages', 'bookmarks',
                       'settings', 'search', 'i', 'login', 'signup', 'register',
                       'about', 'privacy', 'tos', 'discover', 'foryou', 'following',
-                      'reels', 'explore', 'direct', 'accounts', 'p', 'stories'];
+                      'reels', 'explore', 'direct', 'accounts', 'p', 'stories',
+                      'my', 'posts', 'subscriptions', 'hot', 'newlogin', 'tv'];
+    if (platform === 'weibo' && ['u', 'n'].includes(firstSegment.toLowerCase())) {
+      return path.split('/').filter(Boolean).length >= 2;
+    }
     return firstSegment.length > 0 && !excluded.includes(firstSegment.toLowerCase());
   }
 
@@ -200,6 +215,10 @@
         }, '*');
       } else if (platform === 'instagram') {
         window.postMessage({ source: 'profile-downloader', type: 'instagram-media-request' }, '*');
+      } else if (platform === 'onlyfans') {
+        window.postMessage({ source: 'profile-downloader', type: 'onlyfans-media-request' }, '*');
+      } else if (platform === 'weibo') {
+        window.postMessage({ source: 'profile-downloader', type: 'weibo-media-request' }, '*');
       }
     } catch(_) {}
   }
@@ -276,6 +295,63 @@
           });
         });
         if (found > 0) console.log('[ProfileDownloader] Captured', found, 'Instagram media item(s)');
+      }
+      if (event.source === window
+          && event.data?.source === 'profile-downloader'
+          && event.data?.type === 'onlyfans-media') {
+        const username = extractUsername();
+        let found = 0;
+        (event.data.items || []).forEach((item) => {
+          if (item.ownerUsername?.toLowerCase() !== username.toLowerCase()) return;
+          (item.media || []).forEach((media, index) => {
+            const id = `of_${media.id || `${item.postId}_${index}`}`;
+            if (!media.url || accumulatedSeen.has(id)) return;
+            accumulatedSeen.add(id);
+            accumulatedMedia.push({
+              id,
+              media_type: media.type === 'video' ? 'Video' : 'Image',
+              url: media.url,
+              thumbnail_url: media.thumbnail || (media.type === 'image' ? media.url : null),
+              post_url: item.postUrl || `https://onlyfans.com/${item.postId}/${username}`,
+              platform: 'onlyfans',
+              username,
+              caption: item.caption || null,
+              timestamp: item.timestamp || null,
+              content_type: media.type === 'video' ? 'video/mp4' : 'image/jpeg',
+            });
+            found++;
+          });
+        });
+        if (found > 0) console.log('[ProfileDownloader] Captured', found, 'accessible OnlyFans media item(s)');
+      }
+      if (event.source === window
+          && event.data?.source === 'profile-downloader'
+          && event.data?.type === 'weibo-media') {
+        const username = extractUsername();
+        let found = 0;
+        (event.data.items || []).forEach((item) => {
+          if (item.ownerId && /^\d+$/.test(username) && item.ownerId !== username) return;
+          const postUrl = `https://weibo.com/${item.ownerId || username}/${item.postId}`;
+          (item.media || []).forEach((media, index) => {
+            const id = `wb_${media.id || `${item.postId}_${index}`}`;
+            if (!media.url || accumulatedSeen.has(id)) return;
+            accumulatedSeen.add(id);
+            accumulatedMedia.push({
+              id,
+              media_type: media.type === 'video' ? 'Video' : 'Image',
+              url: media.url,
+              thumbnail_url: media.thumbnail || (media.type === 'image' ? media.url : null),
+              post_url: postUrl,
+              platform: 'weibo',
+              username,
+              caption: item.caption || null,
+              timestamp: item.timestamp || null,
+              content_type: media.type === 'video' ? 'video/mp4' : 'image/jpeg',
+            });
+            found++;
+          });
+        });
+        if (found > 0) console.log('[ProfileDownloader] Captured', found, 'Weibo media item(s)');
       }
     });
   }
@@ -806,6 +882,276 @@
     return info;
   }
 
+  // ===== OnlyFans =====
+
+  function onlyFansDomId(url) {
+    let hash = 2166136261;
+    for (let index = 0; index < url.length; index++) {
+      hash ^= url.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `of_dom_${(hash >>> 0).toString(16)}`;
+  }
+
+  function scanOnlyFansDOM() {
+    const username = extractUsername();
+    let found = 0;
+
+    // The /videos route renders poster tiles rather than <video> elements.
+    // A real video tile has a post URL, a play button, and a media-grid image.
+    // Locked tiles use .b-post__unknown and are deliberately excluded.
+    document.querySelectorAll('main a[href]').forEach((link) => {
+      let postId;
+      try {
+        const parts = new URL(link.href, window.location.origin).pathname
+          .split('/')
+          .filter(Boolean);
+        if (parts.length === 2
+            && /^\d+$/.test(parts[0])
+            && parts[1].toLowerCase() === username.toLowerCase()) {
+          postId = parts[0];
+        }
+      } catch (_) {
+        return;
+      }
+      const thumbnail = link.querySelector('img.b-photos__item__img');
+      const hasPlayButton = !!link.querySelector('.b-photos__item__play-btn, [data-icon-name="icon-play"]');
+      if (!postId || !thumbnail || !hasPlayButton || link.querySelector('.b-post__unknown')) return;
+      const thumbnailUrl = resolveImageUrl(thumbnail);
+      if (!thumbnailUrl) return;
+      const id = `of_grid_${postId}_${onlyFansDomId(thumbnailUrl).slice(7)}`;
+      if (accumulatedSeen.has(id)) return;
+      accumulatedSeen.add(id);
+      accumulatedMedia.push({
+        id,
+        media_type: 'Video',
+        url: link.href,
+        thumbnail_url: thumbnailUrl,
+        post_url: link.href,
+        platform: 'onlyfans',
+        username,
+        content_type: 'video/mp4',
+        requires_resolution: true,
+      });
+      found++;
+    });
+    return found;
+  }
+
+  function onlyFansMediaToken(url) {
+    if (!url) return null;
+    const match = String(url).match(/_([a-f0-9]{16,})_frame_\d+\.jpg/i);
+    return match?.[1] || null;
+  }
+
+  function onlyFansVideoQuality(url) {
+    if (/_source\.mp4(?:\?|$)/i.test(url)) return Number.MAX_SAFE_INTEGER;
+    const match = url.match(/_(\d+)p\.mp4(?:\?|$)/i);
+    return match ? Number(match[1]) : 0;
+  }
+
+  function waitForOnlyFansVideo(item, timeoutMs = 15000) {
+    const wantedToken = onlyFansMediaToken(item.thumbnail_url);
+    return new Promise((resolve, reject) => {
+      const startedAt = Date.now();
+      const inspect = () => {
+        const dialog = document.querySelector('[role="dialog"]');
+        if (dialog) {
+          const videos = Array.from(dialog.querySelectorAll('video'));
+          const matchingVideo = videos.find((video) => {
+            const posterToken = onlyFansMediaToken(video.poster);
+            return wantedToken && posterToken === wantedToken;
+          }) || (videos.length === 1 ? videos[0] : null);
+          if (matchingVideo) {
+            const urls = Array.from(matchingVideo.querySelectorAll('source'))
+              .map((source) => source.src)
+              .filter((url) => /^https?:\/\//i.test(url) && /\.mp4(?:\?|$)/i.test(url));
+            const direct = matchingVideo.currentSrc || matchingVideo.src;
+            if (/^https?:\/\//i.test(direct || '') && /\.mp4(?:\?|$)/i.test(direct)) urls.push(direct);
+            urls.sort((a, b) => onlyFansVideoQuality(b) - onlyFansVideoQuality(a));
+            if (urls[0]) return resolve(urls[0]);
+          }
+        }
+        if (Date.now() - startedAt >= timeoutMs) return reject(new Error('OnlyFans video source timed out'));
+        setTimeout(inspect, 150);
+      };
+      inspect();
+    });
+  }
+
+  function closeOnlyFansDialog() {
+    const dialog = document.querySelector('[role="dialog"]');
+    const close = dialog?.querySelector('button[aria-label="Close"], button[title="Close"], .b-modal__close')
+      || Array.from(dialog?.querySelectorAll('button') || []).find((button) => {
+        const label = button.getAttribute('aria-label')
+          || button.getAttribute('title')
+          || button.textContent
+          || '';
+        return label.trim().toLowerCase() === 'close';
+      });
+    if (close) close.click();
+  }
+
+  async function resolveOnlyFansItem(item) {
+    const target = Array.from(document.querySelectorAll('main a[href]')).find((link) => {
+      if (link.href !== item.post_url) return false;
+      const image = link.querySelector('img.b-photos__item__img');
+      return onlyFansMediaToken(resolveImageUrl(image)) === onlyFansMediaToken(item.thumbnail_url);
+    });
+    if (!target || target.querySelector('.b-post__unknown')) {
+      throw new Error('OnlyFans video tile is no longer available or is locked');
+    }
+    target.click();
+    try {
+      return await waitForOnlyFansVideo(item);
+    } finally {
+      closeOnlyFansDialog();
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+
+  async function downloadOnlyFansBatch(items) {
+    if (onlyFansResolutionRunning) throw new Error('OnlyFans video resolution is already running');
+    onlyFansResolutionRunning = true;
+    const errors = [];
+    let downloaded = 0;
+    try {
+      for (const item of items) {
+        try {
+          const url = item.requires_resolution ? await resolveOnlyFansItem(item) : item.url;
+          const response = await chrome.runtime.sendMessage({
+            action: 'downloadPreparedMedia',
+            item: { id: item.id, url, filename: item.filename },
+          });
+          if (!response?.success) throw new Error(response?.error || 'Could not start OnlyFans download');
+          downloaded++;
+        } catch (err) {
+          errors.push({ id: item.id, error: err.message || 'Download failed' });
+        }
+      }
+    } finally {
+      onlyFansResolutionRunning = false;
+    }
+    return {
+      success: downloaded > 0,
+      queued: downloaded,
+      failed: errors.length,
+      errors: errors.slice(0, 10),
+      error: downloaded === 0 ? (errors[0]?.error || 'No OnlyFans videos could be resolved') : undefined,
+    };
+  }
+
+  function getOnlyFansProfile(username) {
+    const info = { username };
+    const nameEl = document.querySelector('main h1, main h2, [class*="user-name"]');
+    if (nameEl) info.display_name = nameEl.textContent.trim();
+    const avatar = document.querySelector('main img[class*="avatar"], header img[class*="avatar"]');
+    if (avatar) info.avatar_url = resolveImageUrl(avatar);
+    return info;
+  }
+
+  // ===== Weibo =====
+
+  function normalizeWeiboImageUrl(rawUrl) {
+    if (!rawUrl) return null;
+    try {
+      const url = new URL(rawUrl, window.location.origin);
+      if (!url.hostname.endsWith('.sinaimg.cn')) return null;
+      const parts = url.pathname.split('/');
+      if (parts.length > 2) parts[1] = 'large';
+      url.pathname = parts.join('/');
+      url.hash = '';
+      return url.href;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function weiboPostInfo(element, username) {
+    const container = element.closest('article, [class*="Feed_wrap"], [class*="card-wrap"]')
+      || element.parentElement;
+    const links = container?.querySelectorAll('a[href]') || [];
+    for (const link of links) {
+      try {
+        const url = new URL(link.href, window.location.origin);
+        const parts = url.pathname.split('/').filter(Boolean);
+        if (url.hostname.endsWith('weibo.com')
+            && parts.length >= 2
+            && /^[A-Za-z0-9]+$/.test(parts[1])
+            && (parts[0] === username || /^\d+$/.test(parts[0]))) {
+          return {
+            id: parts[1],
+            url: `https://weibo.com/${parts[0]}/${parts[1]}`,
+            container,
+          };
+        }
+      } catch (_) {}
+    }
+    return { id: null, url: `https://weibo.com/u/${username}`, container };
+  }
+
+  function scanWeiboDOM() {
+    const username = extractUsername();
+    let found = 0;
+
+    document.querySelectorAll('main img, article img, [class*="Feed_wrap"] img').forEach((img) => {
+      if (img.closest('header, nav, [class*="avatar"], [class*="comment"]')) return;
+      const url = normalizeWeiboImageUrl(resolveImageUrl(img));
+      if (!url) return;
+      const { id: postId, url: postUrl, container } = weiboPostInfo(img, username);
+      const asset = url.split('/').pop()?.split('?')[0] || url;
+      const id = `wb_${postId || 'dom'}_${asset}`;
+      if (accumulatedSeen.has(id)) return;
+      accumulatedSeen.add(id);
+      const captionNode = container?.querySelector('[class*="detail_wbtext"], [class*="Feed_body"]');
+      accumulatedMedia.push({
+        id,
+        media_type: 'Image',
+        url,
+        thumbnail_url: resolveImageUrl(img),
+        post_url: postUrl,
+        platform: 'weibo',
+        username,
+        caption: captionNode?.textContent?.trim() || null,
+        content_type: 'image/jpeg',
+      });
+      found++;
+    });
+
+    document.querySelectorAll('main video, article video, [class*="Feed_wrap"] video').forEach((video) => {
+      const direct = video.currentSrc || video.src
+        || Array.from(video.querySelectorAll('source')).map((source) => source.src).find(Boolean);
+      if (!direct || !/^https?:\/\//i.test(direct) || direct.startsWith('blob:')) return;
+      const { id: postId, url: postUrl, container } = weiboPostInfo(video, username);
+      const id = `wb_${postId || 'dom'}_video`;
+      if (accumulatedSeen.has(id)) return;
+      accumulatedSeen.add(id);
+      const captionNode = container?.querySelector('[class*="detail_wbtext"], [class*="Feed_body"]');
+      accumulatedMedia.push({
+        id,
+        media_type: 'Video',
+        url: direct,
+        thumbnail_url: video.poster || null,
+        post_url: postUrl,
+        platform: 'weibo',
+        username,
+        caption: captionNode?.textContent?.trim() || null,
+        content_type: 'video/mp4',
+      });
+      found++;
+    });
+    return found;
+  }
+
+  function getWeiboProfile(username) {
+    const info = { username };
+    const name = document.querySelector('main h1, main h2, [class*="ProfileHeader_name"]');
+    if (name) info.display_name = name.textContent.trim();
+    const avatar = document.querySelector('main [class*="avatar"] img, [class*="ProfileHeader"] img');
+    if (avatar) info.avatar_url = resolveImageUrl(avatar);
+    return info;
+  }
+
   // ===== Dispatcher =====
 
   function scanDOM() {
@@ -813,6 +1159,8 @@
       case 'twitter':  return scanTwitterDOM();
       case 'tiktok':   return scanTikTokDOM();
       case 'instagram': return scanInstagramDOM();
+      case 'onlyfans': return scanOnlyFansDOM();
+      case 'weibo': return scanWeiboDOM();
       default:         return 0;
     }
   }
@@ -823,6 +1171,8 @@
       case 'twitter':  return getTwitterProfile(username);
       case 'tiktok':   return getTikTokProfile(username);
       case 'instagram': return getInstagramProfile(username);
+      case 'onlyfans': return getOnlyFansProfile(username);
+      case 'weibo': return getWeiboProfile(username);
       default:         return { username };
     }
   }
@@ -914,6 +1264,10 @@
       })();
     } else if (request.action === 'downloadTikTokBatch') {
       downloadTikTokBatch(Array.isArray(request.items) ? request.items : [])
+        .then(sendResponse)
+        .catch((err) => sendResponse({ success: false, error: err.message }));
+    } else if (request.action === 'downloadOnlyFansBatch') {
+      downloadOnlyFansBatch(Array.isArray(request.items) ? request.items : [])
         .then(sendResponse)
         .catch((err) => sendResponse({ success: false, error: err.message }));
     }

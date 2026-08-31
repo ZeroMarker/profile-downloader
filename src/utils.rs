@@ -74,6 +74,10 @@ mod tests {
             extract_username("https://instagram.com/user/", "instagram"),
             Some("user".to_string())
         );
+        assert_eq!(
+            extract_username("https://onlyfans.com/wetkinky/videos", "onlyfans"),
+            Some("wetkinky".to_string())
+        );
     }
 
     #[test]

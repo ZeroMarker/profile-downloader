@@ -139,6 +139,8 @@ async function init() {
       if (path.includes('twitter') || path.includes('x.com')) platform = 'twitter';
       else if (path.includes('tiktok')) platform = 'tiktok';
       else if (path.includes('instagram')) platform = 'instagram';
+      else if (path.includes('onlyfans')) platform = 'onlyfans';
+      else if (path.includes('weibo') || path.includes('微博')) platform = 'weibo';
       // If filename doesn't hint, content script will detect from page content
     } else if (isHost('twitter.com') || isHost('x.com')) {
       platform = 'twitter';
@@ -146,10 +148,14 @@ async function init() {
       platform = 'tiktok';
     } else if (isHost('instagram.com')) {
       platform = 'instagram';
+    } else if (isHost('onlyfans.com')) {
+      platform = 'onlyfans';
+    } else if (isHost('weibo.com')) {
+      platform = 'weibo';
     }
 
     if (!platform) {
-      showError('Not on a supported platform. Open X, TikTok, or Instagram.');
+      showError('Not on a supported platform. Open X, TikTok, Instagram, Weibo, or OnlyFans.');
       return;
     }
 
@@ -161,6 +167,8 @@ async function init() {
       twitter: ['🐦', 'X / Twitter'],
       tiktok: ['🎵', 'TikTok'],
       instagram: ['📸', 'Instagram'],
+      onlyfans: ['🔐', 'OnlyFans'],
+      weibo: ['🧣', '微博 / Weibo'],
     };
     const [icon, label] = badges[platform] || ['❓', platform];
     updatePlatformBadge(icon, label);
@@ -374,6 +382,18 @@ async function startDownload(selectedOnly) {
       ? await chrome.tabs.sendMessage(state.tabId, {
           action: 'downloadTikTokBatch',
           items: downloadItems,
+        })
+      : state.platform === 'onlyfans'
+      ? await chrome.tabs.sendMessage(state.tabId, {
+          action: 'downloadOnlyFansBatch',
+          items: items.map((item) => ({
+            id: item.id,
+            url: item.url,
+            post_url: item.post_url,
+            thumbnail_url: item.thumbnail_url,
+            requires_resolution: !!item.requires_resolution,
+            filename: generateFilename(item),
+          })),
         })
       : await chrome.runtime.sendMessage({
           action: 'downloadBatch',

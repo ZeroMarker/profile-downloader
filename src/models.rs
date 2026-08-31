@@ -7,6 +7,8 @@ pub enum PlatformType {
     Twitter,
     TikTok,
     Instagram,
+    OnlyFans,
+    Weibo,
 }
 
 impl PlatformType {
@@ -24,6 +26,10 @@ impl PlatformType {
             Some(Self::TikTok)
         } else if host == "instagram.com" || host.ends_with(".instagram.com") {
             Some(Self::Instagram)
+        } else if host == "onlyfans.com" || host.ends_with(".onlyfans.com") {
+            Some(Self::OnlyFans)
+        } else if host == "weibo.com" || host.ends_with(".weibo.com") {
+            Some(Self::Weibo)
         } else {
             None
         }
@@ -34,6 +40,8 @@ impl PlatformType {
             "twitter" | "x" => Some(Self::Twitter),
             "tiktok" => Some(Self::TikTok),
             "instagram" | "ig" => Some(Self::Instagram),
+            "onlyfans" | "of" => Some(Self::OnlyFans),
+            "weibo" => Some(Self::Weibo),
             _ => None,
         }
     }
@@ -45,6 +53,8 @@ impl std::fmt::Display for PlatformType {
             Self::Twitter => write!(f, "twitter"),
             Self::TikTok => write!(f, "tiktok"),
             Self::Instagram => write!(f, "instagram"),
+            Self::OnlyFans => write!(f, "onlyfans"),
+            Self::Weibo => write!(f, "weibo"),
         }
     }
 }
@@ -173,6 +183,39 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_onlyfans() {
+        assert_eq!(
+            PlatformType::detect("https://onlyfans.com/creator"),
+            Some(PlatformType::OnlyFans)
+        );
+        assert_eq!(
+            PlatformType::detect("https://www.onlyfans.com/creator"),
+            Some(PlatformType::OnlyFans)
+        );
+        assert_eq!(
+            PlatformType::detect("https://onlyfans.com/wetkinky/videos"),
+            Some(PlatformType::OnlyFans)
+        );
+        assert_eq!(
+            PlatformType::detect("https://notonlyfans.com/creator"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_detect_weibo() {
+        assert_eq!(
+            PlatformType::detect("https://weibo.com/u/1234567890"),
+            Some(PlatformType::Weibo)
+        );
+        assert_eq!(
+            PlatformType::detect("https://www.weibo.com/n/example"),
+            Some(PlatformType::Weibo)
+        );
+        assert_eq!(PlatformType::detect("https://notweibo.com/u/1"), None);
+    }
+
+    #[test]
     fn test_detect_unknown() {
         assert_eq!(PlatformType::detect("https://example.com"), None);
         assert_eq!(PlatformType::detect("https://notx.com/user"), None);
@@ -189,6 +232,8 @@ mod tests {
         assert_eq!(PlatformType::parse("x"), Some(PlatformType::Twitter));
         assert_eq!(PlatformType::parse("TIKTOK"), Some(PlatformType::TikTok));
         assert_eq!(PlatformType::parse("ig"), Some(PlatformType::Instagram));
+        assert_eq!(PlatformType::parse("OF"), Some(PlatformType::OnlyFans));
+        assert_eq!(PlatformType::parse("WEIBO"), Some(PlatformType::Weibo));
         assert_eq!(PlatformType::parse("unknown"), None);
     }
 

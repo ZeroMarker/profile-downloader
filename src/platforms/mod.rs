@@ -1,6 +1,8 @@
 pub mod instagram;
+pub mod onlyfans;
 pub mod tiktok;
 pub mod twitter;
+pub mod weibo;
 
 use crate::models::{PlatformType, ProfileMedia};
 
@@ -21,6 +23,8 @@ impl PlatformType {
             Self::Twitter => twitter::TwitterScraper::extract_media(html, page_url),
             Self::TikTok => tiktok::TikTokScraper::extract_media(html, page_url),
             Self::Instagram => instagram::InstagramScraper::extract_media(html, page_url),
+            Self::OnlyFans => onlyfans::OnlyFansScraper::extract_media(html, page_url),
+            Self::Weibo => weibo::WeiboScraper::extract_media(html, page_url),
         }
     }
 }

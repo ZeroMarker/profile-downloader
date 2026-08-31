@@ -1,117 +1,103 @@
 # Profile Media Downloader
 
-> 一款基于 **Rust WASM** 驱动的 Chrome 扩展，一键下载 **X/Twitter、TikTok、Instagram** 个人主页的图片和视频。
+一个由 Rust + WebAssembly 驱动的 Chrome 扩展，用于预览并批量下载个人主页中**当前账号可访问、且已加载到页面中的**图片和视频。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/ZeroMarker/profile-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/ZeroMarker/profile-downloader/actions/workflows/ci.yml)
 
----
+## 支持的平台
 
-## ✨ 特性
+| 平台 | 主页示例 | 说明 |
+| --- | --- | --- |
+| X / Twitter | `x.com/username` | 支持页面图片和可识别的视频源 |
+| TikTok | `tiktok.com/@username` | 支持当前页面已加载的视频 |
+| Instagram | `instagram.com/username` | 支持图片、视频和轮播内容 |
+| 微博 | `weibo.com/u/用户ID` | 支持当前页面已加载的图片和视频 |
+| OnlyFans | `onlyfans.com/username` | 需要登录；只处理当前账号有权访问的内容 |
 
-| 特性 | 说明 |
-|------|------|
-| 🚀 **Rust WASM 核心** | 高性能数据解析与处理，编译为 WebAssembly 运行 |
-| 🎯 **三平台支持** | X/Twitter · TikTok · Instagram 一键切换 |
-| 🔍 **智能检测** | 自动识别当前页面平台，提取个人主页媒体 |
-| 🖼️ **媒体预览** | 可视化网格预览，支持多选/单选 |
-| 📦 **批量下载** | 一键全部下载或仅下载选中项 |
-| 🧹 **智能去重** | 基于内容哈希去重，避免重复下载 |
-| ⚙️ **可配置** | 下载路径、并发数、自动选择等设置 |
-| 🛡️ **隐私安全** | 纯客户端运行，不上传任何数据到服务器 |
+平台页面和媒体接口会持续变化。如果扫描结果不完整，请先向下滚动以加载更多内容，再重新打开扩展。
 
----
+## 功能
 
-## 📦 安装
+- 自动识别当前平台并扫描媒体
+- 网格预览、单选、全选和批量下载
+- 按媒体 ID 去重，并按时间倒序排列
+- 持久化下载队列；默认最多同时下载 3 个文件
+- WASM 加载失败时自动使用 JavaScript 回退逻辑
+- 全程在浏览器本地处理，不向本项目的服务器上传数据
+
+## 安装
+
+### 使用发布包
+
+1. 从 GitHub Releases 下载 ZIP 并解压。
+2. 打开 `chrome://extensions/`。
+3. 开启右上角的「开发者模式」。
+4. 点击「加载已解压的扩展程序」，选择解压后的目录。
+
+> Chrome 应用商店版本尚未发布。
 
 ### 从源码构建
 
+需要安装 [Rust](https://www.rust-lang.org/tools/install)、`wasm-pack` 和 Chrome：
+
 ```bash
-# 1. 安装 wasm-pack
-cargo install wasm-pack
-
-# 2. 构建 WASM 核心库
-wasm-pack build --release --target web --out-dir extension/wasm
-
-# 3. 加载扩展
-# Chrome → chrome://extensions → 开启"开发者模式" → "加载已解压的扩展" → 选择 extension/ 目录
+cargo install wasm-pack --version 0.15.0 --locked
+wasm-pack build --release --target web --out-dir extension/wasm --locked
 ```
 
-### 从 Chrome 应用商店
+构建完成后，在 `chrome://extensions/` 中加载仓库里的 `extension/` 目录。
 
-> 即将上架
+## 使用方法
 
----
+1. 登录目标平台，并进入用户个人主页。
+2. 向下滚动，让需要下载的内容加载到页面中。
+3. 点击浏览器工具栏中的扩展图标。
+4. 在预览网格中选择媒体，或直接下载全部媒体。
+5. 文件会保存到 Chrome 默认下载目录下的 `ProfileDownloader/` 文件夹。
 
-## 🚀 使用指南
+OnlyFans 支持不会解锁内容、绕过付费墙，或获取当前账号无权访问的媒体。使用本扩展时，请遵守平台条款、创作者权利和所在地法律。
 
-1. 访问支持的平台个人主页：
-   - `twitter.com/用户名` 或 `x.com/用户名`
-   - `tiktok.com/@用户名`
-   - `instagram.com/用户名`
-2. 点击扩展图标 🧩 打开侧边弹窗
-3. 扩展自动扫描页面中所有媒体内容
-4. 选择你要下载的媒体项（或全选）
-5. 点击「Download」按钮即可批量保存
+## 开发
 
----
+```bash
+# 运行 Rust 测试
+cargo test --locked
 
-## 🏗️ 项目结构
+# 检查格式和常见问题
+cargo fmt -- --check
+cargo clippy --locked --all-targets -- -D warnings
 
+# 检查扩展脚本语法
+node --check extension/background.js
+node --check extension/content_script.js
+node --check extension/popup.js
 ```
+
+核心目录：
+
+```text
 profile-downloader/
-├── Cargo.toml                   # Rust 项目配置
-├── src/                         # Rust WASM 核心库
-│   ├── lib.rs                   # 库入口，WASM 导出
-│   ├── models.rs                # 数据模型
-│   ├── utils.rs                 # 工具函数
-│   ├── downloader.rs            # 下载管理器
-│   └── platforms/               # 各平台解析器
-│       ├── mod.rs               # 平台路由
-│       ├── twitter.rs           # X/Twitter 解析器
-│       ├── tiktok.rs            # TikTok 解析器
-│       └── instagram.rs         # Instagram 解析器
-├── extension/                   # Chrome 扩展
-│   ├── manifest.json            # 扩展清单 V3
-│   ├── popup.html               # 弹窗 UI
-│   ├── popup.js                 # 弹窗逻辑
-│   ├── styles.css               # 样式
-│   ├── background.js            # 后台 Service Worker
-│   ├── content_script.js        # 内容注入脚本
-│   └── icons/                   # 扩展图标
-├── wasm/                        # WASM 构建输出
-├── docs/                        # 文档
-│   ├── technical-design.md      # 技术设计文档
-│   └── development-plan.md      # 开发计划
-└── README.md                    # 本文件
+├── src/                         # Rust/WASM 核心
+│   ├── lib.rs                   # WASM 导出接口
+│   ├── models.rs                # 平台、媒体和下载数据模型
+│   ├── downloader.rs            # 文件名与下载任务模型
+│   └── platforms/               # 五个平台的解析器
+├── extension/                   # Chrome Manifest V3 扩展
+│   ├── background.js            # 下载队列与 Service Worker
+│   ├── content_script.js        # 页面媒体提取
+│   ├── *_interceptor.js         # 页面主环境中的媒体请求捕获
+│   ├── popup.html / popup.js    # 扩展弹窗
+│   └── wasm/                    # wasm-pack 构建输出
+├── docs/
+│   ├── technical-design.md      # 架构、数据流与安全边界
+│   └── development-plan.md      # 当前状态与后续计划
+└── .github/workflows/           # CI 与发布流程
 ```
 
----
+更详细的实现说明见[技术设计文档](docs/technical-design.md)，项目状态见[开发计划](docs/development-plan.md)。
 
-## 🧰 技术栈
-
-| 层级 | 技术 |
-|------|------|
-| **核心引擎** | Rust → WASM (wasm-pack + wasm-bindgen) |
-| **扩展框架** | Chrome Extension Manifest V3 |
-| **前端 UI** | 原生 HTML/CSS/JS (无框架依赖) |
-| **序列化** | serde / serde_json |
-| **构建工具** | cargo + wasm-pack |
-| **解析** | regex (Rust) + DOM API (浏览器端) |
-
----
-
-## 🤝 参与贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/amazing`)
-3. 提交改动 (`git commit -am 'feat: add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing`)
-5. 创建 Pull Request
-
-### 发布版本
+## 发布
 
 发布标签必须与 `extension/manifest.json` 中的版本一致：
 
@@ -120,10 +106,18 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-GitHub Actions 会构建 WASM、打包扩展，并在对应 Release 中上传 ZIP 和 SHA-256 校验文件。
+Release 工作流会执行质量检查、构建 WASM、打包扩展，并上传 ZIP 与 SHA-256 校验文件。
 
----
+## 贡献
 
-## 📄 许可证
+欢迎提交 Issue 和 Pull Request。修复平台解析问题时，建议同时提供：
+
+- 出现问题的平台和页面类型
+- 可复现步骤及浏览器版本
+- 已脱敏的控制台日志或页面结构样本
+
+请勿在 Issue 中提交 Cookie、访问令牌、付费内容或其他敏感数据。
+
+## 许可证
 
 [MIT License](LICENSE) © 2026 Mark Chen

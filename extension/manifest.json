@@ -2,15 +2,16 @@
   "manifest_version": 3,
   "name": "Profile Media Downloader",
   "version": "1.0.0",
-  "description": "Download profile media from X/Twitter, TikTok, and Instagram — powered by Rust WASM",
+  "description": "Download accessible profile media from X/Twitter, TikTok, Instagram, Weibo, and OnlyFans — powered by Rust WASM",
   "author": "Mark Chen",
-  "homepage_url": "https://github.com/markchen/profile-downloader",
+  "homepage_url": "https://github.com/ZeroMarker/profile-downloader",
   "permissions": [
     "activeTab",
     "downloads",
     "storage",
     "scripting",
-    "webRequest"
+    "webRequest",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
     "https://twitter.com/*",
@@ -23,6 +24,13 @@
     "https://*.cdninstagram.com/*",
     "https://*.tiktokcdn.com/*",
     "https://*.fbcdn.net/*",
+    "https://onlyfans.com/*",
+    "https://*.onlyfans.com/*",
+    "https://*.onlyfans.com.cdn.cloudflare.net/*",
+    "https://weibo.com/*",
+    "https://www.weibo.com/*",
+    "https://*.sinaimg.cn/*",
+    "https://*.weibocdn.com/*",
     "file:///*"
   ],
   "action": {
@@ -38,7 +46,34 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "weibo_media_headers",
+        "enabled": true,
+        "path": "rules/weibo_media_headers.json"
+      }
+    ]
+  },
   "content_scripts": [
+    {
+      "matches": [
+        "https://weibo.com/*",
+        "https://www.weibo.com/*"
+      ],
+      "js": ["weibo_media_interceptor.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://onlyfans.com/*",
+        "https://www.onlyfans.com/*"
+      ],
+      "js": ["onlyfans_media_interceptor.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": [
         "https://twitter.com/*",
@@ -72,6 +107,10 @@
         "https://www.tiktok.com/*",
         "https://instagram.com/*",
         "https://www.instagram.com/*",
+        "https://onlyfans.com/*",
+        "https://www.onlyfans.com/*",
+        "https://weibo.com/*",
+        "https://www.weibo.com/*",
         "file:///*"
       ],
       "js": ["content_script.js"],

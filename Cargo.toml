@@ -2,7 +2,7 @@
 name = "profile-downloader-core"
 version = "0.1.0"
 edition = "2021"
-description = "Core WASM library for X/TikTok/Instagram profile media downloader Chrome extension"
+description = "Core WASM library for X/TikTok/Instagram/Weibo/OnlyFans profile media downloader Chrome extension"
 authors = ["Mark Chen"]
 license = "MIT"
 
