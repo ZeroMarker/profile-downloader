@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Profile Media Downloader",
   "version": "1.0.0",
-  "description": "Download accessible profile media from X/Twitter, TikTok, Instagram, Weibo, and OnlyFans — powered by Rust WASM",
+  "description": "Download accessible profile media from X/Twitter, TikTok, Douyin, Instagram, Weibo, and OnlyFans — powered by Rust WASM",
   "author": "Mark Chen",
   "homepage_url": "https://github.com/ZeroMarker/profile-downloader",
   "permissions": [
@@ -10,7 +10,6 @@
     "downloads",
     "storage",
     "scripting",
-    "webRequest",
     "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
@@ -31,7 +30,11 @@
     "https://www.weibo.com/*",
     "https://*.sinaimg.cn/*",
     "https://*.weibocdn.com/*",
-    "file:///*"
+    "file:///*",
+    "https://douyin.com/*",
+    "https://*.douyin.com/*",
+    "https://*.douyinvod.com/*",
+    "https://*.byteimg.com/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -52,16 +55,34 @@
         "id": "weibo_media_headers",
         "enabled": true,
         "path": "rules/weibo_media_headers.json"
+      },
+      {
+        "id": "douyin_media_headers",
+        "enabled": true,
+        "path": "rules/douyin_media_headers.json"
       }
     ]
   },
   "content_scripts": [
     {
       "matches": [
+        "https://douyin.com/*",
+        "https://*.douyin.com/*"
+      ],
+      "js": [
+        "douyin_media_interceptor.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
         "https://weibo.com/*",
         "https://www.weibo.com/*"
       ],
-      "js": ["weibo_media_interceptor.js"],
+      "js": [
+        "weibo_media_interceptor.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
@@ -70,7 +91,9 @@
         "https://onlyfans.com/*",
         "https://www.onlyfans.com/*"
       ],
-      "js": ["onlyfans_media_interceptor.js"],
+      "js": [
+        "onlyfans_media_interceptor.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
@@ -79,7 +102,9 @@
         "https://twitter.com/*",
         "https://x.com/*"
       ],
-      "js": ["twitter_video_interceptor.js"],
+      "js": [
+        "twitter_video_interceptor.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
@@ -87,7 +112,9 @@
       "matches": [
         "https://www.tiktok.com/*"
       ],
-      "js": ["tiktok_video_interceptor.js"],
+      "js": [
+        "tiktok_video_interceptor.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
@@ -96,7 +123,9 @@
         "https://instagram.com/*",
         "https://www.instagram.com/*"
       ],
-      "js": ["instagram_media_interceptor.js"],
+      "js": [
+        "instagram_media_interceptor.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
@@ -111,9 +140,13 @@
         "https://www.onlyfans.com/*",
         "https://weibo.com/*",
         "https://www.weibo.com/*",
-        "file:///*"
+        "file:///*",
+        "https://douyin.com/*",
+        "https://*.douyin.com/*"
       ],
-      "js": ["content_script.js"],
+      "js": [
+        "content_script.js"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -124,8 +157,13 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["wasm/profile_downloader_core.js", "wasm/profile_downloader_core_bg.wasm"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "wasm/profile_downloader_core.js",
+        "wasm/profile_downloader_core_bg.wasm"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ],
   "content_security_policy": {

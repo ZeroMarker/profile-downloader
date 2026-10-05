@@ -1,3 +1,4 @@
+pub mod douyin;
 pub mod instagram;
 pub mod onlyfans;
 pub mod tiktok;
@@ -21,6 +22,7 @@ impl PlatformType {
     ) -> Result<Vec<ProfileMedia>, String> {
         match self {
             Self::Twitter => twitter::TwitterScraper::extract_media(html, page_url),
+            Self::Douyin => douyin::DouyinScraper::extract_media(html, page_url),
             Self::TikTok => tiktok::TikTokScraper::extract_media(html, page_url),
             Self::Instagram => instagram::InstagramScraper::extract_media(html, page_url),
             Self::OnlyFans => onlyfans::OnlyFansScraper::extract_media(html, page_url),

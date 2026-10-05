@@ -37,8 +37,19 @@ pub fn generate_media_id(platform: &str, username: &str, url: &str) -> String {
 }
 
 /// Extract the username from a profile URL for a given platform.
-pub fn extract_username(url: &str, _platform: &str) -> Option<String> {
+pub fn extract_username(url: &str, platform: &str) -> Option<String> {
     let parsed = url::Url::parse(url).ok()?;
+    if platform == "douyin" {
+        let mut segments = parsed.path_segments()?;
+        return (segments.next()? == "user")
+            .then(|| {
+                segments
+                    .next()
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+            })
+            .flatten();
+    }
     parsed
         .path_segments()?
         .find(|segment| !segment.is_empty())

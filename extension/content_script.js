@@ -18,10 +18,15 @@
   let accumulatedSeen = new Set();
   let observer = null;
   let scanTimer = null;
+  let profileKey = null;
+  let profileGeneration = 0;
+  let profileHasChanged = false;
+  const preparedBlobUrls = new Set();
   const twitterVideoCandidates = new Map();
   const tiktokVideoCandidates = new Map();
   const tiktokResolutionTasks = new Map();
   const tiktokDownloadRequests = new Map();
+  let douyinProfile = null;
   let onlyFansResolutionRunning = false;
 
   function detectPlatform() {
@@ -31,6 +36,7 @@
     if (!host || window.location.protocol === 'file:') {
       const html = document.documentElement.innerHTML.toLowerCase();
       if (html.includes('twitter.com') || html.includes('x.com')) return 'twitter';
+      if (html.includes('douyin.com')) return 'douyin';
       if (html.includes('tiktok.com')) return 'tiktok';
       if (html.includes('instagram.com')) return 'instagram';
       if (html.includes('onlyfans.com')) return 'onlyfans';
@@ -45,6 +51,7 @@
       return null;
     }
     if (isHost('twitter.com') || isHost('x.com')) return 'twitter';
+    if (isHost('douyin.com')) return 'douyin';
     if (isHost('tiktok.com')) return 'tiktok';
     if (isHost('instagram.com')) return 'instagram';
     if (isHost('onlyfans.com')) return 'onlyfans';
@@ -69,6 +76,7 @@
     }
     const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
     const segments = path.split('/').filter(Boolean);
+    if (platform === 'douyin' && segments[0] === 'user') return segments[1] || '';
     if (platform === 'weibo' && ['u', 'n'].includes(segments[0]?.toLowerCase())) {
       return (segments[1] || '').replace(/^@/, '');
     }
@@ -81,6 +89,7 @@
     if (window.location.protocol === 'file:') return true;
     const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
     const firstSegment = path.split('/')[0] || '';
+    if (platform === 'douyin') return /^user\/[^/]+\/?$/.test(path);
     const excluded = ['home', 'explore', 'notifications', 'messages', 'bookmarks',
                       'settings', 'search', 'i', 'login', 'signup', 'register',
                       'about', 'privacy', 'tos', 'discover', 'foryou', 'following',
@@ -217,6 +226,8 @@
         window.postMessage({ source: 'profile-downloader', type: 'instagram-media-request' }, '*');
       } else if (platform === 'onlyfans') {
         window.postMessage({ source: 'profile-downloader', type: 'onlyfans-media-request' }, '*');
+      } else if (platform === 'douyin') {
+        window.postMessage({ source: 'profile-downloader', type: 'douyin-media-request' }, '*');
       } else if (platform === 'weibo') {
         window.postMessage({ source: 'profile-downloader', type: 'weibo-media-request' }, '*');
       }
@@ -224,6 +235,30 @@
   }
   function setupPageMessageListener() {
     window.addEventListener('message', function(event) {
+      if (event.data?.source === 'profile-downloader'
+          && ['twitter-videos', 'tiktok-videos', 'instagram-media', 'onlyfans-media', 'weibo-media', 'douyin-media'].includes(event.data.type)
+          && !syncProfileContext()) return;
+      if (event.source === window && platform === 'douyin'
+          && event.data?.source === 'profile-downloader' && event.data.type === 'douyin-media') {
+        const username = extractUsername();
+        if (event.data.profile?.sec_uid === username) douyinProfile = event.data.profile;
+        for (const item of event.data.items || []) {
+          if (item.ownerId !== username) continue;
+          for (const media of item.media || []) {
+            let url;
+            try { url = new URL(media.url); } catch (_) { continue; }
+            if (!['https:', 'http:'].includes(url.protocol) || /(^|\.)douyin\.com$/.test(url.hostname)) continue;
+            const id = `dy_${item.postId}_${media.id}`;
+            if (accumulatedSeen.has(id)) continue;
+            accumulatedSeen.add(id);
+            accumulatedMedia.push({ id, media_type: media.type === 'video' ? 'Video' : 'Image',
+              url: url.href, thumbnail_url: media.thumbnail || null,
+              post_url: `https://www.douyin.com/${media.type === 'image' ? 'note' : 'video'}/${item.postId}`,
+              platform: 'douyin', username, caption: item.caption || null, timestamp: item.timestamp,
+              content_type: media.type === 'video' ? 'video/mp4' : null });
+          }
+        }
+      }
       if (event.data && event.data.source === 'profile-downloader' && event.data.type === 'twitter-videos') {
         var urls = event.data.urls || [];
         var found = 0;
@@ -248,14 +283,21 @@
       }
       if (event.source === window
           && event.data?.source === 'profile-downloader'
-          && event.data?.type === 'tiktok-download-result') {
+          && event.data?.type === (platform === 'douyin' ? 'douyin-download-result' : 'tiktok-download-result')) {
         const pending = tiktokDownloadRequests.get(event.data.requestId);
-        if (!pending) return;
-        tiktokDownloadRequests.delete(event.data.requestId);
-        if (!event.data.success || !event.data.blobUrl) {
-          pending.reject(new Error(event.data.error || 'TikTok download failed'));
+        if (!pending) {
+          // The page fetch can finish after the request timed out.
+          if (event.data.blobUrl) {
+            window.postMessage({ source: 'profile-downloader', type: platform === 'douyin' ? 'douyin-revoke-blob' : 'tiktok-revoke-blob', blobUrl: event.data.blobUrl }, '*');
+          }
           return;
         }
+        tiktokDownloadRequests.delete(event.data.requestId);
+        if (!event.data.success || !event.data.blobUrl) {
+          pending.reject(new Error(event.data.error || 'Media download failed'));
+          return;
+        }
+        preparedBlobUrls.add(event.data.blobUrl);
         chrome.runtime.sendMessage({
           action: 'downloadPreparedMedia',
           item: {
@@ -264,9 +306,11 @@
             filename: pending.item.filename,
           },
         }).then((response) => {
-          if (!response?.success) throw new Error(response?.error || 'Could not start TikTok download');
+          if (!response?.success) throw new Error(response?.error || 'Could not start media download');
           pending.resolve(response);
         }).catch((err) => {
+          preparedBlobUrls.delete(event.data.blobUrl);
+          window.postMessage({ source: 'profile-downloader', type: platform === 'douyin' ? 'douyin-revoke-blob' : 'tiktok-revoke-blob', blobUrl: event.data.blobUrl }, '*');
           pending.reject(err);
         });
       }
@@ -370,6 +414,20 @@
     return { username: fallbackUsername, tweetId: null, postUrl: window.location.href };
   }
 
+  function twitterImageBelongsToProfile(img, username) {
+    const tweet = img.closest?.('article[data-testid="tweet"]');
+    if (tweet) return twitterPostInfo(tweet, '').username.toLowerCase() === username.toLowerCase();
+    const link = img.closest?.('a[href*="/status/"]');
+    if (link) {
+      try {
+        const owner = new URL(link.href, window.location.origin).pathname.match(/^\/([^/]+)\/status\/\d+/)?.[1];
+        return owner?.toLowerCase() === username.toLowerCase();
+      } catch (_) { return false; }
+    }
+    // Unattributed images are safe only on the original document's profile.
+    return !profileHasChanged;
+  }
+
   function findTwitterVideoForTweet(tweet) {
     const video = tweet.querySelector('video');
     const poster = video?.poster || video?.getAttribute('poster') || '';
@@ -404,6 +462,7 @@
       if (!assetId || !twitterVideoCandidates.has(assetId)) return;
 
       const statusMatch = link.pathname.match(/^\/([^/]+)\/status\/(\d+)\/video\/\d+/i);
+      if (!statusMatch || statusMatch[1].toLowerCase() !== username.toLowerCase()) return;
       const postUrl = statusMatch
         ? window.location.origin + '/' + statusMatch[1] + '/status/' + statusMatch[2]
         : link.href;
@@ -446,6 +505,8 @@
     const tweetArticles = document.querySelectorAll('article[data-testid="tweet"]');
     tweetArticles.forEach((tweet) => {
       const post = twitterPostInfo(tweet, username);
+      if (post.username.toLowerCase() !== username.toLowerCase()
+          || (profileHasChanged && !post.tweetId)) return;
       const postUrl = post.postUrl;
 
       const imgs = tweet.querySelectorAll('img[src*="pbs.twimg.com/media"], img[data-src*="pbs.twimg.com/media"]');
@@ -501,6 +562,7 @@
       'img[src*="pbs.twimg.com/media"], img[data-src*="pbs.twimg.com/media"]'
     );
     allImgs.forEach((img) => {
+      if (!twitterImageBelongsToProfile(img, username)) return;
       let src = resolveImageUrl(img);
       if (!src) return;
       src = src.replace(/name=\w+/, 'name=large');
@@ -621,6 +683,7 @@
     if (tiktokVideoCandidates.has(videoId)) return Promise.resolve(true);
     if (tiktokResolutionTasks.has(videoId)) return tiktokResolutionTasks.get(videoId);
 
+    const generation = profileGeneration;
     const task = (async () => {
       try {
         const endpoint = new URL('/api/item/detail/', window.location.origin);
@@ -631,6 +694,8 @@
         });
         if (!response.ok) return false;
         const payload = await response.json();
+        syncProfileContext();
+        if (generation !== profileGeneration) return false;
 
         let matched = false;
         const visited = new Set();
@@ -662,7 +727,9 @@
         console.warn('[ProfileDownloader] Could not resolve TikTok post', postUrl, err);
         return false;
       }
-    })().finally(() => tiktokResolutionTasks.delete(videoId));
+    })().finally(() => {
+      if (tiktokResolutionTasks.get(videoId) === task) tiktokResolutionTasks.delete(videoId);
+    });
 
     tiktokResolutionTasks.set(videoId, task);
     return task;
@@ -682,6 +749,9 @@
         const itemModule = sigi.ItemModule;
         if (itemModule) {
           Object.values(itemModule).forEach((item) => {
+            const owner = typeof item.author === 'string' ? item.author
+              : item.author?.uniqueId || item.author?.unique_id;
+            if (owner ? owner.toLowerCase() !== username.toLowerCase() : profileHasChanged) return;
             const video = item.video;
             const videoUrl = bestTikTokVideoUrl([
               video?.bitRate?.[0]?.playAddr?.UrlList,
@@ -712,6 +782,8 @@
     const videoLinks = document.querySelectorAll('a[href*="/video/"]');
     videoLinks.forEach((link) => {
       const href = link.href;
+      const owner = new URL(href, window.location.origin).pathname.match(/^\/@([^/]+)\/video\//)?.[1];
+      if (owner?.toLowerCase() !== username.toLowerCase()) return;
       const match = href.match(/\/video\/(\d+)/);
       if (match && !accumulatedSeen.has(match[1])) {
         const videoUrl = tiktokVideoCandidates.get(match[1]);
@@ -756,7 +828,7 @@
       const requestId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const timer = setTimeout(() => {
         tiktokDownloadRequests.delete(requestId);
-        reject(new Error('TikTok video fetch timed out'));
+        reject(new Error('Media fetch timed out; keep the source page open and retry'));
       }, 60000);
       tiktokDownloadRequests.set(requestId, {
         item,
@@ -765,7 +837,7 @@
       });
       window.postMessage({
         source: 'profile-downloader',
-        type: 'tiktok-download-request',
+        type: platform === 'douyin' ? 'douyin-download-request' : 'tiktok-download-request',
         requestId,
         url: item.url,
         filename: item.filename,
@@ -789,7 +861,7 @@
       queued: downloaded,
       failed: errors.length,
       errors: errors.slice(0, 10),
-      error: downloaded === 0 ? (errors[0]?.error || 'No TikTok videos could be downloaded') : undefined,
+      error: downloaded === 0 ? (errors[0]?.error || 'No media could be downloaded') : undefined,
     };
   }
 
@@ -1154,7 +1226,26 @@
 
   // ===== Dispatcher =====
 
+  function syncProfileContext() {
+    const nextKey = platform && isProfilePage()
+      ? `${platform}:${platform === 'douyin' ? extractUsername() : extractUsername().toLowerCase()}` : null;
+    if (nextKey !== profileKey) {
+      if (profileGeneration > 0 || nextKey === null) profileHasChanged = true;
+      profileKey = nextKey;
+      profileGeneration++;
+      accumulatedMedia = [];
+      douyinProfile = null;
+      accumulatedSeen.clear();
+      twitterVideoCandidates.clear();
+      tiktokVideoCandidates.clear();
+      tiktokResolutionTasks.clear();
+      if (nextKey) requestPageScriptInjection();
+    }
+    return nextKey !== null;
+  }
+
   function scanDOM() {
+    if (!syncProfileContext()) return 0;
     switch (platform) {
       case 'twitter':  return scanTwitterDOM();
       case 'tiktok':   return scanTikTokDOM();
@@ -1172,6 +1263,11 @@
       case 'tiktok':   return getTikTokProfile(username);
       case 'instagram': return getInstagramProfile(username);
       case 'onlyfans': return getOnlyFansProfile(username);
+      case 'douyin': {
+        const name = document.querySelector('[data-e2e="user-info"] h1, [data-e2e="user-info"] h2');
+        return { ...douyinProfile, username: douyinProfile?.username || username,
+          profile_id: username, display_name: douyinProfile?.display_name || name?.textContent?.trim() || null };
+      }
       case 'weibo': return getWeiboProfile(username);
       default:         return { username };
     }
@@ -1200,11 +1296,8 @@
         }
       }
     });
-    const targetNode = document.querySelector(
-      'main, [data-testid="primaryColumn"], section, ' +
-      'div[role="main"], div[data-pagelet], ' +
-      '#content, .timeline, .feed'
-    ) || document.body;
+    // SPA navigation can replace the entire main element.
+    const targetNode = document.documentElement;
     observer.observe(targetNode, { childList: true, subtree: true });
     console.log('[ProfileDownloader] Observer watching for new media on ' + platform);
   }
@@ -1214,13 +1307,14 @@
   function init() {
     platform = detectPlatform();
     if (!platform) return;
-    if (!isProfilePage()) return;
+    profileHasChanged = !isProfilePage();
 
     // Set up page-context message listener (for JS runtime data)
     setupPageMessageListener();
 
-    // Inject page script to read JS runtime variables (Twitter video URLs)
-    requestPageScriptInjection();
+    // Re-scan browser history navigation; DOM observation covers SPA rendering.
+    window.addEventListener('popstate', debouncedScan);
+    window.addEventListener('hashchange', debouncedScan);
 
     // Initial full scan
     const initial = scanDOM();
@@ -1233,7 +1327,13 @@
   // ===== Message Handler =====
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === 'extractMedia') {
+    if (request.action === 'releasePreparedBlob') {
+      preparedBlobUrls.delete(request.url);
+      window.postMessage({ source: 'profile-downloader', type: platform === 'douyin' ? 'douyin-revoke-blob' : 'tiktok-revoke-blob', blobUrl: request.url }, '*');
+      sendResponse({ success: true });
+    } else if (request.action === 'validatePreparedBlob') {
+      sendResponse({ valid: preparedBlobUrls.has(request.url) });
+    } else if (request.action === 'extractMedia') {
       (async () => {
         try {
         scanDOM();
@@ -1252,7 +1352,9 @@
         });
         accumulatedMedia = deduped;
         sendResponse({
-          media: accumulatedMedia,
+          media: platform === 'douyin'
+            ? accumulatedMedia.map(item => ({ ...item, username: douyinProfile?.username || extractUsername(), display_name: getProfileInfo().display_name }))
+            : accumulatedMedia,
           username: extractUsername(),
           profileInfo: getProfileInfo(),
           totalScanned: accumulatedMedia.length,
@@ -1262,7 +1364,7 @@
           sendResponse({ error: err.message || 'Extraction failed' });
         }
       })();
-    } else if (request.action === 'downloadTikTokBatch') {
+    } else if (request.action === 'downloadTikTokBatch' || (platform === 'douyin' && request.action === 'downloadDouyinBatch')) {
       downloadTikTokBatch(Array.isArray(request.items) ? request.items : [])
         .then(sendResponse)
         .catch((err) => sendResponse({ success: false, error: err.message }));

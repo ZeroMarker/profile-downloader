@@ -60,7 +60,13 @@ function processMedia(rawMedia) {
         console.warn('[ProfileDownloader] WASM error:', result.error, '— using JS fallback');
         return jsFallbackProcess(rawMedia);
       }
-      return result;
+      // Rust processes its core fields; retain page-specific download metadata.
+      // Keep the first occurrence, matching the core's deduplication policy.
+      const originals = new Map();
+      rawMedia.forEach((item) => {
+        if (!originals.has(item.id)) originals.set(item.id, item);
+      });
+      return result.map((item) => ({ ...originals.get(item.id), ...item }));
     } catch (err) {
       console.warn('[ProfileDownloader] WASM processing failed, using JS fallback:', err);
     }
@@ -137,6 +143,7 @@ async function init() {
       // For local HTML exports, try to detect from filename first
       const path = decodeURIComponent(url.pathname).toLowerCase();
       if (path.includes('twitter') || path.includes('x.com')) platform = 'twitter';
+      else if (path.includes('douyin') || path.includes('抖音')) platform = 'douyin';
       else if (path.includes('tiktok')) platform = 'tiktok';
       else if (path.includes('instagram')) platform = 'instagram';
       else if (path.includes('onlyfans')) platform = 'onlyfans';
@@ -144,6 +151,8 @@ async function init() {
       // If filename doesn't hint, content script will detect from page content
     } else if (isHost('twitter.com') || isHost('x.com')) {
       platform = 'twitter';
+    } else if (isHost('douyin.com')) {
+      platform = 'douyin';
     } else if (isHost('tiktok.com')) {
       platform = 'tiktok';
     } else if (isHost('instagram.com')) {
@@ -155,7 +164,7 @@ async function init() {
     }
 
     if (!platform) {
-      showError('Not on a supported platform. Open X, TikTok, Instagram, Weibo, or OnlyFans.');
+      showError('Not on a supported platform. Open X, TikTok, Douyin, Instagram, Weibo, or OnlyFans.');
       return;
     }
 
@@ -166,6 +175,7 @@ async function init() {
     const badges = {
       twitter: ['🐦', 'X / Twitter'],
       tiktok: ['🎵', 'TikTok'],
+      douyin: ['🎵', '抖音 / Douyin'],
       instagram: ['📸', 'Instagram'],
       onlyfans: ['🔐', 'OnlyFans'],
       weibo: ['🧣', '微博 / Weibo'],
@@ -194,11 +204,16 @@ async function init() {
       return;
     }
 
-    if (response?.media && response.media.length > 0) {
-      // Process through WASM core if ready, else JS fallback
-      state.mediaItems = processMedia(response.media);
+    if (response?.profileInfo) {
       state.username = response.username;
       renderProfile(response.profileInfo);
+    }
+    if (response?.media && response.media.length > 0) {
+      // Process through WASM core if ready, else JS fallback
+      state.mediaItems = processMedia(response.media.map(item => ({
+        ...item,
+        display_name: item.display_name || response.profileInfo?.display_name || null,
+      })));
       renderMediaList(state.mediaItems);
       await restoreDownloadState();
     } else {
@@ -217,16 +232,27 @@ async function init() {
 async function restoreDownloadState() {
   try {
     const status = await chrome.runtime.sendMessage({ action: 'getDownloadQueueStatus' });
-    if ((status?.pending || 0) + (status?.active || 0) === 0) return;
+    if ((status?.pending || 0) + (status?.active || 0) === 0) {
+      if (status?.lastError) {
+        sections.progress.classList.remove('hidden');
+        $('#progress-text').textContent = status.lastError;
+      }
+      return;
+    }
     state.isDownloading = true;
     $('#download-all-btn').disabled = true;
     $('#download-selected-btn').disabled = true;
     $('#select-all-btn').disabled = true;
     sections.progress.classList.remove('hidden');
     $('#progress-fill').style.width = '70%';
-    $('#progress-text').textContent = `${status.pending || 0} queued, ${status.active || 0} downloading`;
+    $('#progress-text').textContent = downloadQueueText(status);
     monitorDownloads();
   } catch (_) {}
+}
+
+function downloadQueueText(status) {
+  const progress = `${status.pending || 0} queued, ${status.active || 0} downloading`;
+  return status.lastError ? `${progress}. ${status.lastError}` : progress;
 }
 
 function monitorDownloads() {
@@ -236,7 +262,7 @@ function monitorDownloads() {
       const status = await chrome.runtime.sendMessage({ action: 'getDownloadQueueStatus' });
       const remaining = (status?.pending || 0) + (status?.active || 0);
       if (remaining > 0) {
-        $('#progress-text').textContent = `${status.pending || 0} queued, ${status.active || 0} downloading`;
+        $('#progress-text').textContent = downloadQueueText(status);
         return;
       }
       clearInterval(state.monitorTimer);
@@ -245,7 +271,7 @@ function monitorDownloads() {
       $('#download-all-btn').disabled = false;
       $('#select-all-btn').disabled = false;
       $('#progress-fill').style.width = '100%';
-      $('#progress-text').textContent = 'Downloads complete';
+      $('#progress-text').textContent = status.lastError || 'Downloads complete';
       updateDownloadButton();
     } catch (_) {}
   }, 1000);
@@ -265,7 +291,10 @@ function updatePlatformBadge(icon, text) {
 function renderProfile(info) {
   if (!info) return;
   sections.profile.classList.remove('hidden');
-  $('#profile-username').textContent = `@${info.username || state.username}`;
+  const username = info.username || state.username || '';
+  $('#profile-username').textContent = state.platform === 'douyin'
+    ? (username === info.profile_id ? `用户 ID：${username}` : `抖音号：${username}`)
+    : `@${username}`;
   $('#profile-display-name').textContent = info.display_name || '';
   const stats = [];
   if (info.post_count != null) stats.push(`${info.post_count} posts`);
@@ -378,9 +407,9 @@ async function startDownload(selectedOnly) {
       url: item.url,
       filename: generateFilename(item),
     }));
-    const response = state.platform === 'tiktok'
+    const response = ['tiktok', 'douyin'].includes(state.platform)
       ? await chrome.tabs.sendMessage(state.tabId, {
-          action: 'downloadTikTokBatch',
+          action: state.platform === 'douyin' ? 'downloadDouyinBatch' : 'downloadTikTokBatch',
           items: downloadItems,
         })
       : state.platform === 'onlyfans'
@@ -416,9 +445,10 @@ async function startDownload(selectedOnly) {
   const queueStatus = await chrome.runtime.sendMessage({ action: 'getDownloadQueueStatus' });
   if ((queueStatus?.pending || 0) + (queueStatus?.active || 0) > 0) {
     state.isDownloading = true;
-    text.textContent = `${queueStatus.pending || 0} queued, ${queueStatus.active || 0} downloading`;
+    text.textContent = downloadQueueText(queueStatus);
     monitorDownloads();
   } else {
+    if (queueStatus?.lastError) text.textContent = queueStatus.lastError;
     state.isDownloading = false;
     $('#download-all-btn').disabled = false;
     $('#select-all-btn').disabled = false;
@@ -427,16 +457,19 @@ async function startDownload(selectedOnly) {
 }
 
 /**
- * Generate a filename with user folder: {platform}_{username}/{id}.{ext}
+ * Generate a filename: {platform}/{username}_{nickname}/{id}.{ext}
  * Chrome downloads API creates subdirectories automatically.
  */
 function generateFilename(item) {
   const ext = getExtension(item);
-  const safeUsername = (item.username || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const safeId = (item.id || 'media').replace(/[^a-zA-Z0-9_-]/g, '_');
-  // Folder per user
-  const userFolder = `${item.platform}_${safeUsername}`;
-  return `${userFolder}/${safeId}.${ext}`;
+  const sanitize = (value, fallback) => String(value || fallback)
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_')
+    .replace(/[. ]+$/g, '') || fallback;
+  const safeUsername = sanitize(item.username, 'unknown');
+  const safeId = sanitize(item.id, 'media');
+  const nickname = sanitize(item.display_name, '未命名');
+  const platform = sanitize(item.platform, 'unknown');
+  return `${platform}/${safeUsername}_${nickname}/${safeId}.${ext}`;
 }
 
 /**

@@ -44,5 +44,8 @@ jobs:
           node --check extension/popup.js
           node --check extension/twitter_video_interceptor.js
 
+      - name: Run extension regression tests
+        run: node --test tests/extension.test.cjs
+
       - name: Validate extension manifest
         run: node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json', 'utf8'))"

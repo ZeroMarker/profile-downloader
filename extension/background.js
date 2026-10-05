@@ -18,6 +18,7 @@ let downloadQueueState = {
   active: {},
   completed: 0,
   failed: 0,
+  lastError: null,
 };
 let queuePumpRunning = false;
 const downloadQueueLoaded = loadDownloadQueueState();
@@ -45,6 +46,7 @@ async function loadDownloadQueueState() {
     active: state.active && typeof state.active === 'object' ? state.active : {},
     completed: Number(state.completed) || 0,
     failed: Number(state.failed) || 0,
+    lastError: state.lastError || null,
   };
 }
 
@@ -134,8 +136,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case 'downloadPreparedMedia':
-      startPreparedDownload(request.item)
-        .then((downloadId) => sendResponse({ success: true, downloadId }))
+      startPreparedDownload(request.item, sender.tab?.id, sender.documentId)
+        .then((result) => sendResponse({ success: true, ...result }))
         .catch((err) => sendResponse({ success: false, error: err.message || 'Download failed' }));
       return true;
 
@@ -184,13 +186,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 async function handleDownload(url, filename, retries = 1) {
   validateDownloadUrl(url);
 
-  // Split into folder and file parts (expected format: "user_folder/file.ext")
+  // Preserve nested folders while sanitizing each path segment.
   const parts = (filename || 'media').split('/');
   const filePart = parts.pop() || 'media';
-  const folderPart = parts.join('_');
+  const folderParts = parts;
 
   // Sanitize folder name
-  const safeFolder = folderPart.replace(/[<>:"\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_').replace(/^_+|_+$/g, '');
+  const safeFolder = folderParts.map(part => part.replace(/[<>:"\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_').replace(/^_+|_+$/g, '').replace(/[. ]+$/g, '') || '_').join('/');
   // Sanitize file name
   const safeFile = filePart.replace(/[<>:"\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_').replace(/^_+|_+$/g, '');
 
@@ -221,7 +223,7 @@ async function handleDownload(url, filename, retries = 1) {
  * Persist a complete batch before replying to the popup. The service worker
  * starts only maxConcurrent downloads and advances the queue on completion.
  */
-async function enqueueDownloadBatch(items) {
+async function enqueueDownloadBatch(items, sourceTabId, sourceDocumentId) {
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error('No media items to download');
   }
@@ -240,12 +242,17 @@ async function enqueueDownloadBatch(items) {
         id: item.id,
         url: item.url,
         filename: item.filename,
+        sourceTabId,
+        sourceDocumentId,
       });
     } catch (err) {
       errors.push({ id: item.id, error: err.message || 'Invalid download' });
     }
   });
 
+  if (!downloadQueueState.pending.length && !Object.keys(downloadQueueState.active).length && accepted.length) {
+    downloadQueueState.lastError = null;
+  }
   downloadQueueState.pending.push(...accepted);
   await persistDownloadQueue();
   pumpDownloadQueue();
@@ -258,18 +265,53 @@ async function enqueueDownloadBatch(items) {
   };
 }
 
-async function startPreparedDownload(item) {
+async function startPreparedDownload(item, sourceTabId, sourceDocumentId) {
   if (!item?.url || !item?.filename) throw new Error('Invalid prepared download');
+  validateDownloadUrl(item.url);
+  if (item.url.startsWith('blob:') && sourceTabId == null) {
+    throw new Error('Prepared video requires a source tab');
+  }
+  return enqueueDownloadBatch([item], sourceTabId, sourceDocumentId);
+}
+
+const PREPARED_SOURCE_ERROR = 'TikTok source page was closed or refreshed. Reopen the profile and retry the affected videos.';
+
+function preparedMessageOptions(item) {
+  return item.sourceDocumentId ? { documentId: item.sourceDocumentId } : {};
+}
+
+async function validatePreparedBlob(item) {
+  if (!item.url.startsWith('blob:')) return;
+  try {
+    const response = await chrome.tabs.sendMessage(item.sourceTabId, {
+      action: 'validatePreparedBlob', url: item.url,
+    }, preparedMessageOptions(item));
+    if (response?.valid) return;
+  } catch (_) {}
+  throw new Error(PREPARED_SOURCE_ERROR);
+}
+
+async function invalidatePreparedDownloads(tabId) {
   await downloadQueueLoaded;
-  const downloadId = await handleDownload(item.url, item.filename);
-  downloadQueueState.active[String(downloadId)] = {
-    id: item.id,
-    url: item.url,
-    filename: item.filename,
-    prepared: true,
-  };
+  const stale = downloadQueueState.pending.filter((item) => item.sourceTabId === tabId && item.url.startsWith('blob:'));
+  if (!stale.length) return;
+  downloadQueueState.pending = downloadQueueState.pending.filter((item) => !stale.includes(item));
+  downloadQueueState.failed += stale.length;
+  downloadQueueState.lastError = PREPARED_SOURCE_ERROR;
   await persistDownloadQueue();
-  return downloadId;
+  await Promise.all(stale.map(releasePreparedBlob));
+  pumpDownloadQueue();
+}
+
+async function releasePreparedBlob(item) {
+  if (!item?.url?.startsWith('blob:') || item.sourceTabId == null) return;
+  try {
+    await chrome.tabs.sendMessage(item.sourceTabId, {
+      action: 'releasePreparedBlob', url: item.url,
+    }, preparedMessageOptions(item));
+  } catch (_) {
+    // Closing the source document also releases its object URLs.
+  }
 }
 
 async function getDownloadQueueStatus() {
@@ -279,6 +321,7 @@ async function getDownloadQueueStatus() {
     active: Object.keys(downloadQueueState.active).length,
     completed: downloadQueueState.completed,
     failed: downloadQueueState.failed,
+    lastError: downloadQueueState.lastError,
   };
 }
 
@@ -296,10 +339,13 @@ async function pumpDownloadQueue() {
     ) {
       const item = downloadQueueState.pending.shift();
       try {
+        await validatePreparedBlob(item);
         const downloadId = await handleDownload(item.url, item.filename);
         downloadQueueState.active[String(downloadId)] = item;
       } catch (err) {
         downloadQueueState.failed++;
+        downloadQueueState.lastError = err.message || 'Download failed';
+        await releasePreparedBlob(item);
         console.error(`[ProfileDownloader] Could not start ${item.id}:`, err);
       }
       await persistDownloadQueue();
@@ -314,11 +360,13 @@ async function settleQueuedDownload(downloadId, failed) {
   const key = String(downloadId);
   if (!downloadQueueState.active[key]) return;
 
+  const item = downloadQueueState.active[key];
   delete downloadQueueState.active[key];
   if (failed) downloadQueueState.failed++;
   else downloadQueueState.completed++;
   await persistDownloadQueue();
   pumpDownloadQueue();
+  await releasePreparedBlob(item);
 }
 
 async function reconcileActiveDownloads() {
@@ -330,10 +378,12 @@ async function reconcileActiveDownloads() {
     const download = matches[0];
     if (download?.state === 'in_progress') continue;
 
+    const item = downloadQueueState.active[key];
     delete downloadQueueState.active[key];
     if (download?.state === 'complete') downloadQueueState.completed++;
     else downloadQueueState.failed++;
     changed = true;
+    await releasePreparedBlob(item);
   }
 
   if (changed) await persistDownloadQueue();
@@ -387,6 +437,13 @@ chrome.downloads.onChanged.addListener((delta) => {
     console.error(`[ProfileDownloader] Download failed (${delta.id}): ${delta.error.current}`);
     settleQueuedDownload(delta.id, true);
   }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  invalidatePreparedDownloads(tabId).catch(console.error);
+});
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'loading') invalidatePreparedDownloads(tabId).catch(console.error);
 });
 
 downloadQueueLoaded.then(() => reconcileActiveDownloads());

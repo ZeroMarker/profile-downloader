@@ -4,12 +4,18 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag matching the extension version (e.g. v1.0.0)"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -17,10 +23,19 @@ jobs:
     name: Build extension release
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Configure Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: Configure Rust
         run: |
@@ -30,7 +45,13 @@ jobs:
 
       - name: Verify release version
         run: |
-          tag_version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "Release tag must be v followed by a Chrome extension version" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "$RELEASE_TAG^{commit}")"
+          tag_version="${RELEASE_TAG#v}"
           manifest_version="$(node -p "require('./extension/manifest.json').version")"
           if [ "$tag_version" != "$manifest_version" ]; then
             echo "Tag version $tag_version does not match manifest version $manifest_version" >&2
@@ -45,11 +66,13 @@ jobs:
 
       - name: Check extension JavaScript
         run: |
-          node --check extension/background.js
-          node --check extension/content_script.js
-          node --check extension/popup.js
-          node --check extension/twitter_video_interceptor.js
+          for script in extension/*.js; do
+            node --check "$script"
+          done
           node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json', 'utf8'))"
+
+      - name: Run extension regression tests
+        run: node --test tests/extension.test.cjs
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.15.0 --locked
@@ -60,31 +83,36 @@ jobs:
       - name: Package extension
         run: |
           mkdir -p dist
-          archive="profile-downloader-${GITHUB_REF_NAME}.zip"
+          archive="profile-downloader-${RELEASE_TAG}.zip"
           cd extension
-          zip -r "../dist/$archive" .
+          zip -r "../dist/$archive" . -x '_metadata/*' 'wasm/.gitignore'
           cd ../dist
           sha256sum "$archive" > "$archive.sha256"
 
       - name: Verify package contents
         run: |
-          archive="dist/profile-downloader-${GITHUB_REF_NAME}.zip"
+          archive="dist/profile-downloader-${RELEASE_TAG}.zip"
           unzip -t "$archive"
           unzip -l "$archive" | grep -F "manifest.json"
           unzip -l "$archive" | grep -F "wasm/profile_downloader_core.js"
           unzip -l "$archive" | grep -F "wasm/profile_downloader_core_bg.wasm"
+          if unzip -Z1 "$archive" | grep -q '^_metadata/'; then
+            echo "Package contains Chrome-generated metadata" >&2
+            exit 1
+          fi
+          (cd dist && sha256sum -c "profile-downloader-${RELEASE_TAG}.zip.sha256")
 
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          archive="dist/profile-downloader-${GITHUB_REF_NAME}.zip"
+          archive="dist/profile-downloader-${RELEASE_TAG}.zip"
           checksum="$archive.sha256"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "$archive" "$checksum" --clobber
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$archive" "$checksum" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "$archive" "$checksum" \
+            gh release create "$RELEASE_TAG" "$archive" "$checksum" \
               --verify-tag \
               --generate-notes \
-              --title "Profile Downloader $GITHUB_REF_NAME"
+              --title "Profile Downloader $RELEASE_TAG"
           fi

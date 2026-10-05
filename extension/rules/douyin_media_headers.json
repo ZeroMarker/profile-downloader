@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        {
+          "header": "Referer",
+          "operation": "set",
+          "value": "https://www.douyin.com/"
+        }
+      ]
+    },
+    "condition": {
+      "requestDomains": [
+        "douyinvod.com"
+      ],
+      "resourceTypes": [
+        "media",
+        "xmlhttprequest",
+        "other"
+      ]
+    }
+  }
+]

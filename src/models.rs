@@ -6,6 +6,7 @@ use std::cmp::Reverse;
 pub enum PlatformType {
     Twitter,
     TikTok,
+    Douyin,
     Instagram,
     OnlyFans,
     Weibo,
@@ -22,6 +23,8 @@ impl PlatformType {
             || host.ends_with(".x.com")
         {
             Some(Self::Twitter)
+        } else if host == "douyin.com" || host.ends_with(".douyin.com") {
+            Some(Self::Douyin)
         } else if host == "tiktok.com" || host.ends_with(".tiktok.com") {
             Some(Self::TikTok)
         } else if host == "instagram.com" || host.ends_with(".instagram.com") {
@@ -38,6 +41,7 @@ impl PlatformType {
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "twitter" | "x" => Some(Self::Twitter),
+            "douyin" => Some(Self::Douyin),
             "tiktok" => Some(Self::TikTok),
             "instagram" | "ig" => Some(Self::Instagram),
             "onlyfans" | "of" => Some(Self::OnlyFans),
@@ -51,6 +55,7 @@ impl std::fmt::Display for PlatformType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Twitter => write!(f, "twitter"),
+            Self::Douyin => write!(f, "douyin"),
             Self::TikTok => write!(f, "tiktok"),
             Self::Instagram => write!(f, "instagram"),
             Self::OnlyFans => write!(f, "onlyfans"),

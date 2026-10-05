@@ -6,6 +6,7 @@
   'use strict';
 
   const published = new Map();
+  const downloadBlobs = new Set();
 
   function firstUrl(value) {
     if (typeof value === 'string') return value;
@@ -119,7 +120,7 @@
       return;
     }
 
-    if (event.data?.type === 'tiktok-revoke-blob' && event.data?.blobUrl) {
+    if (event.data?.type === 'tiktok-revoke-blob' && downloadBlobs.delete(event.data?.blobUrl)) {
       URL.revokeObjectURL(event.data.blobUrl);
     }
   });
@@ -142,7 +143,9 @@
       }
 
       const objectUrl = URL.createObjectURL(blob);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 120000);
+      // A queued download may wait longer than two minutes. Release on completion
+      // (or failure) via the background worker, or when this document closes.
+      downloadBlobs.add(objectUrl);
       window.postMessage({
         source: 'profile-downloader',
         type: 'tiktok-download-result',
