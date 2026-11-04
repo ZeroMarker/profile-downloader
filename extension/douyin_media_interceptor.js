@@ -78,7 +78,7 @@
   async function downloadMedia(request) {
     try {
       const url = new URL(request.url);
-      const allowed = ['douyinvod.com', 'douyinpic.com', 'byteimg.com'];
+      const allowed = ['douyinvod.com', 'zjcdn.com', 'douyinpic.com', 'byteimg.com'];
       if (url.protocol !== 'https:' || !allowed.some(host => url.hostname === host || url.hostname.endsWith('.' + host))) {
         throw new Error('Unsupported Douyin media URL');
       }

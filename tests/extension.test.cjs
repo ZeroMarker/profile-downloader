@@ -38,6 +38,12 @@ test('Douyin fetches media in the source page and rejects HTML before queuing', 
   const blobUrl = posted.at(-1).blobUrl;
   listener({ source: window, data: { source: 'profile-downloader', type: 'douyin-revoke-blob', blobUrl } });
   assert.deepEqual(revoked, [blobUrl]);
+  listener({ source: window, data: { source: 'profile-downloader', type: 'douyin-download-request', requestId: 'z', url: 'https://v5-dy-o.zjcdn.com/video' } });
+  await flush();
+  assert.equal(posted.at(-1).success, true);
+  listener({ source: window, data: { source: 'profile-downloader', type: 'douyin-download-request', requestId: 'x', url: 'https://evil.example.com/video' } });
+  await flush();
+  assert.match(posted.at(-1).error, /Unsupported/);
   mime = 'text/html'; request(); await flush();
   assert.equal(posted.at(-1).success, false);
   assert.match(posted.at(-1).error, /invalid media/);
