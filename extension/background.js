@@ -23,6 +23,15 @@ let downloadQueueState = {
 let queuePumpRunning = false;
 const downloadQueueLoaded = loadDownloadQueueState();
 
+// Completed downloads keyed by their saved path ("ProfileDownloader/x/alice_A/123.jpg").
+// Filenames are derived from stable media IDs, so the path identifies the media.
+const DOWNLOAD_HISTORY_KEY = 'downloadHistory';
+const DOWNLOAD_HISTORY_LIMIT = 50000;
+let downloadHistory = {};
+const downloadHistoryLoaded = loadDownloadHistory();
+// Serializes enqueues so concurrent batches cannot both pass the duplicate check.
+let enqueueChain = Promise.resolve();
+
 /**
  * Load settings from storage on startup.
  */
@@ -48,6 +57,91 @@ async function loadDownloadQueueState() {
     failed: Number(state.failed) || 0,
     lastError: state.lastError || null,
   };
+}
+
+async function loadDownloadHistory() {
+  try {
+    const stored = await chrome.storage.local.get(DOWNLOAD_HISTORY_KEY);
+    const history = stored?.[DOWNLOAD_HISTORY_KEY];
+    if (history && typeof history === 'object' && !Array.isArray(history)) downloadHistory = history;
+  } catch (_) {}
+}
+
+async function persistDownloadHistory() {
+  const keys = Object.keys(downloadHistory);
+  if (keys.length > DOWNLOAD_HISTORY_LIMIT) {
+    keys.slice(0, keys.length - DOWNLOAD_HISTORY_LIMIT).forEach((key) => delete downloadHistory[key]);
+  }
+  await chrome.storage.local.set({ [DOWNLOAD_HISTORY_KEY]: downloadHistory });
+}
+
+async function recordCompletedDownload(item, downloadId) {
+  if (!item?.path) return;
+  await downloadHistoryLoaded;
+  delete downloadHistory[item.path];
+  downloadHistory[item.path] = downloadId;
+  await persistDownloadHistory();
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * True when this path was already saved and Chrome does not report the file
+ * as deleted. Also recognizes files downloaded before history was recorded.
+ */
+async function isAlreadyDownloaded(path) {
+  await downloadHistoryLoaded;
+  if (Object.prototype.hasOwnProperty.call(downloadHistory, path)) {
+    try {
+      const [record] = await chrome.downloads.search({ id: Number(downloadHistory[path]) });
+      // A missing record only means the Chrome list was cleared; keep trusting history.
+      if (!record || record.exists !== false) return true;
+    } catch (_) {
+      return true;
+    }
+    delete downloadHistory[path];
+    await persistDownloadHistory();
+    return false;
+  }
+
+  try {
+    const pattern = `(^|[\\\\/])${path.split('/').map(escapeRegex).join('[\\\\/]')}$`;
+    const matches = await chrome.downloads.search({ filenameRegex: pattern, state: 'complete' });
+    const existing = matches.find((download) => download.exists !== false);
+    if (!existing) return false;
+    downloadHistory[path] = existing.id;
+    await persistDownloadHistory();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function isPathQueued(path) {
+  return downloadQueueState.pending.some((item) => item.path === path)
+    || Object.values(downloadQueueState.active).some((item) => item.path === path);
+}
+
+/**
+ * Return the requested filenames that are already downloaded or queued.
+ */
+async function findDownloadedFilenames(filenames) {
+  if (!Array.isArray(filenames)) return [];
+  await downloadQueueLoaded;
+  const found = [];
+  for (const filename of filenames) {
+    const path = resolveDownloadPath(filename);
+    if (isPathQueued(path) || await isAlreadyDownloaded(path)) found.push(filename);
+  }
+  return found;
+}
+
+async function clearDownloadHistory() {
+  await downloadHistoryLoaded;
+  downloadHistory = {};
+  await persistDownloadHistory();
 }
 
 function isTikTokWebEndpoint(rawUrl) {
@@ -141,6 +235,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         .catch((err) => sendResponse({ success: false, error: err.message || 'Download failed' }));
       return true;
 
+    case 'getDownloadedFilenames':
+      findDownloadedFilenames(request.filenames)
+        .then((filenames) => sendResponse({ success: true, filenames }))
+        .catch((err) => sendResponse({ success: false, error: err.message, filenames: [] }));
+      return true;
+
+    case 'clearDownloadHistory':
+      clearDownloadHistory()
+        .then(() => sendResponse({ success: true }))
+        .catch((err) => sendResponse({ success: false, error: err.message }));
+      return true;
+
     case 'getDownloadQueueStatus':
       getDownloadQueueStatus().then(sendResponse);
       return true;
@@ -183,22 +289,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  * Includes basic retry logic for transient failures.
  * The `filename` parameter may include subdirectories: "user_folder/file.ext"
  */
-async function handleDownload(url, filename, retries = 1) {
-  validateDownloadUrl(url);
-
+function resolveDownloadPath(filename) {
   // Preserve nested folders while sanitizing each path segment.
-  const parts = (filename || 'media').split('/');
+  const parts = String(filename || 'media').split('/');
   const filePart = parts.pop() || 'media';
   const folderParts = parts;
 
   // Sanitize folder name
   const safeFolder = folderParts.map(part => part.replace(/[<>:"\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_').replace(/^_+|_+$/g, '').replace(/[. ]+$/g, '') || '_').join('/');
   // Sanitize file name
-  const safeFile = filePart.replace(/[<>:"\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_').replace(/^_+|_+$/g, '');
+  const safeFile = filePart.replace(/[<>:"\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_').replace(/^_+|_+$/g, '') || 'media';
 
-  const fullPath = safeFolder
+  return safeFolder
     ? `${settings.downloadPath}/${safeFolder}/${safeFile}`
     : `${settings.downloadPath}/${safeFile}`;
+}
+
+async function handleDownload(url, filename, retries = 1) {
+  validateDownloadUrl(url);
+  const fullPath = resolveDownloadPath(filename);
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -206,7 +315,8 @@ async function handleDownload(url, filename, retries = 1) {
         url,
         filename: fullPath,
         saveAs: false,
-        conflictAction: 'uniquify',
+        // Same path means same media ID; never create "name (1).ext" copies.
+        conflictAction: 'overwrite',
       });
       return downloadId;
     } catch (err) {
@@ -223,7 +333,13 @@ async function handleDownload(url, filename, retries = 1) {
  * Persist a complete batch before replying to the popup. The service worker
  * starts only maxConcurrent downloads and advances the queue on completion.
  */
-async function enqueueDownloadBatch(items, sourceTabId, sourceDocumentId) {
+function enqueueDownloadBatch(items, sourceTabId, sourceDocumentId) {
+  const run = enqueueChain.then(() => enqueueDownloadBatchNow(items, sourceTabId, sourceDocumentId));
+  enqueueChain = run.catch(() => {});
+  return run;
+}
+
+async function enqueueDownloadBatchNow(items, sourceTabId, sourceDocumentId) {
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error('No media items to download');
   }
@@ -232,34 +348,45 @@ async function enqueueDownloadBatch(items, sourceTabId, sourceDocumentId) {
   const batchId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const accepted = [];
   const errors = [];
+  const skippedIds = [];
+  const batchPaths = new Set();
 
-  items.forEach((item, index) => {
+  for (const [index, item] of items.entries()) {
     try {
       validateDownloadUrl(item.url);
+      const path = resolveDownloadPath(item.filename);
+      if (batchPaths.has(path) || isPathQueued(path) || await isAlreadyDownloaded(path)) {
+        skippedIds.push(item.id);
+        continue;
+      }
+      batchPaths.add(path);
       accepted.push({
         queueId: `${batchId}_${index}`,
         batchId,
         id: item.id,
         url: item.url,
         filename: item.filename,
+        path,
         sourceTabId,
         sourceDocumentId,
       });
     } catch (err) {
       errors.push({ id: item.id, error: err.message || 'Invalid download' });
     }
-  });
+  }
 
   if (!downloadQueueState.pending.length && !Object.keys(downloadQueueState.active).length && accepted.length) {
     downloadQueueState.lastError = null;
   }
   downloadQueueState.pending.push(...accepted);
-  await persistDownloadQueue();
+  if (accepted.length) await persistDownloadQueue();
   pumpDownloadQueue();
 
   return {
     batchId,
     queued: accepted.length,
+    skipped: skippedIds.length,
+    skippedIds: skippedIds.slice(0, 50),
     failed: errors.length,
     errors: errors.slice(0, 10),
   };
@@ -271,7 +398,9 @@ async function startPreparedDownload(item, sourceTabId, sourceDocumentId) {
   if (item.url.startsWith('blob:') && sourceTabId == null) {
     throw new Error('Prepared video requires a source tab');
   }
-  return enqueueDownloadBatch([item], sourceTabId, sourceDocumentId);
+  const result = await enqueueDownloadBatch([item], sourceTabId, sourceDocumentId);
+  if (result.skipped) await releasePreparedBlob({ ...item, sourceTabId, sourceDocumentId });
+  return result;
 }
 
 const PREPARED_SOURCE_ERROR = 'TikTok source page was closed or refreshed. Reopen the profile and retry the affected videos.';
@@ -365,6 +494,7 @@ async function settleQueuedDownload(downloadId, failed) {
   if (failed) downloadQueueState.failed++;
   else downloadQueueState.completed++;
   await persistDownloadQueue();
+  if (!failed) await recordCompletedDownload(item, downloadId);
   pumpDownloadQueue();
   await releasePreparedBlob(item);
 }
@@ -380,8 +510,10 @@ async function reconcileActiveDownloads() {
 
     const item = downloadQueueState.active[key];
     delete downloadQueueState.active[key];
-    if (download?.state === 'complete') downloadQueueState.completed++;
-    else downloadQueueState.failed++;
+    if (download?.state === 'complete') {
+      downloadQueueState.completed++;
+      await recordCompletedDownload(item, Number(key));
+    } else downloadQueueState.failed++;
     changed = true;
     await releasePreparedBlob(item);
   }

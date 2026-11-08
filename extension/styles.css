@@ -204,6 +204,22 @@ body {
   border-color: var(--success);
 }
 
+.media-item.downloaded img {
+  opacity: 0.4;
+}
+
+.media-item.downloaded::after {
+  content: '✓ Downloaded';
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  font-size: 10px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
 /* ===== Buttons ===== */
 .btn {
   padding: 8px 16px;

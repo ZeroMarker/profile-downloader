@@ -848,20 +848,23 @@
   async function downloadTikTokBatch(items) {
     const errors = [];
     let downloaded = 0;
+    let skipped = 0;
     for (const item of items) {
       try {
-        await downloadTikTokInPage(item);
-        downloaded++;
+        const response = await downloadTikTokInPage(item);
+        if (response?.skipped) skipped++;
+        else downloaded++;
       } catch (err) {
         errors.push({ id: item.id, error: err.message || 'Download failed' });
       }
     }
     return {
-      success: downloaded > 0,
+      success: downloaded + skipped > 0,
       queued: downloaded,
+      skipped,
       failed: errors.length,
       errors: errors.slice(0, 10),
-      error: downloaded === 0 ? (errors[0]?.error || 'No media could be downloaded') : undefined,
+      error: downloaded + skipped === 0 ? (errors[0]?.error || 'No media could be downloaded') : undefined,
     };
   }
 
@@ -1087,6 +1090,7 @@
     onlyFansResolutionRunning = true;
     const errors = [];
     let downloaded = 0;
+    let skipped = 0;
     try {
       for (const item of items) {
         try {
@@ -1096,7 +1100,8 @@
             item: { id: item.id, url, filename: item.filename },
           });
           if (!response?.success) throw new Error(response?.error || 'Could not start OnlyFans download');
-          downloaded++;
+          if (response.skipped) skipped++;
+          else downloaded++;
         } catch (err) {
           errors.push({ id: item.id, error: err.message || 'Download failed' });
         }
@@ -1105,11 +1110,12 @@
       onlyFansResolutionRunning = false;
     }
     return {
-      success: downloaded > 0,
+      success: downloaded + skipped > 0,
       queued: downloaded,
+      skipped,
       failed: errors.length,
       errors: errors.slice(0, 10),
-      error: downloaded === 0 ? (errors[0]?.error || 'No OnlyFans videos could be resolved') : undefined,
+      error: downloaded + skipped === 0 ? (errors[0]?.error || 'No OnlyFans videos could be resolved') : undefined,
     };
   }
 

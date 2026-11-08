@@ -52,6 +52,17 @@ Background Service Worker
 
 队列保存在 `chrome.storage.local` 的 `downloadQueueState` 中。Service Worker 再次启动时会对仍标记为活动状态的 Chrome 下载进行核对。
 
+### 防止重复下载
+
+文件名由稳定的媒体 ID 生成，因此 Background 以最终保存路径作为去重键：
+
+- 同一批次内、或已在队列（pending/active）中的相同路径直接跳过。
+- 成功完成的路径记录在 `chrome.storage.local` 的 `downloadHistory` 中（路径 → Chrome 下载 ID），Service Worker 重启后仍有效。
+- 历史中没有记录时，再用 `chrome.downloads.search` 按路径匹配 Chrome 已完成的下载，兼容启用此功能前已下载的文件。
+- 只有当 Chrome 明确报告文件已删除（`exists === false`）时才允许重新下载；Chrome 下载列表被清空不影响历史判断。
+- Popup 打开时会把已下载项标记为“✓ Downloaded”，下载时先排除这些项，避免 TikTok/抖音在页面内白白拉取视频。
+- `conflictAction` 使用 `overwrite`，相同路径不会再生成 `name (1).ext` 副本。
+
 ## 4. 核心数据模型
 
 ```rust

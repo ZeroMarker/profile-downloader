@@ -16,6 +16,7 @@ let state = {
   username: null,
   mediaItems: [],
   selectedIds: new Set(),
+  downloadedIds: new Set(),
   isDownloading: false,
   wasmReady: false,
   monitorTimer: null,
@@ -215,6 +216,7 @@ async function init() {
         display_name: item.display_name || response.profileInfo?.display_name || null,
       })));
       renderMediaList(state.mediaItems);
+      await refreshDownloadedMarks();
       await restoreDownloadState();
     } else {
       showError('No media found on this page. Try scrolling down to load more content.');
@@ -226,6 +228,31 @@ async function init() {
       console.error('[ProfileDownloader] Init error:', err);
       showError(err.message || 'Failed to initialize.');
     }
+  }
+}
+
+/**
+ * Ask the background which items are already downloaded or queued, so they
+ * are marked in the grid and skipped by "Download All".
+ */
+async function refreshDownloadedMarks() {
+  try {
+    const filenames = state.mediaItems.map(generateFilename);
+    const response = await chrome.runtime.sendMessage({ action: 'getDownloadedFilenames', filenames });
+    const done = new Set(response?.filenames || []);
+    state.downloadedIds = new Set(state.mediaItems
+      .filter((item, index) => done.has(filenames[index]))
+      .map((item) => item.id));
+  } catch (_) {
+    return;
+  }
+  document.querySelectorAll('.media-item').forEach((el) => {
+    el.classList.toggle('downloaded', state.downloadedIds.has(el.dataset.id));
+  });
+  const count = $('#media-count');
+  if (count && state.downloadedIds.size > 0) {
+    const badge = state.wasmReady ? ' ⚡' : '';
+    count.textContent = `${state.mediaItems.length} items · ${state.downloadedIds.size} downloaded${badge}`;
   }
 }
 
@@ -384,11 +411,20 @@ function updateDownloadButton() {
 async function startDownload(selectedOnly) {
   if (state.isDownloading) return;
 
-  const items = selectedOnly
+  await refreshDownloadedMarks();
+  const requested = selectedOnly
     ? state.mediaItems.filter((m) => state.selectedIds.has(m.id))
     : state.mediaItems;
+  const items = requested.filter((m) => !state.downloadedIds.has(m.id));
+  const alreadyDone = requested.length - items.length;
 
-  if (items.length === 0) return;
+  if (requested.length === 0) return;
+  if (items.length === 0) {
+    sections.progress.classList.remove('hidden');
+    $('#progress-fill').style.width = '100%';
+    $('#progress-text').textContent = `All ${requested.length} files were already downloaded`;
+    return;
+  }
   state.isDownloading = true;
 
   $('#download-all-btn').disabled = true;
@@ -433,8 +469,12 @@ async function startDownload(selectedOnly) {
     }
 
     fill.style.width = '100%';
+    const skipped = alreadyDone + (response.skipped || 0);
+    const notes = [];
+    if (skipped > 0) notes.push(`${skipped} already downloaded`);
+    if (response.failed > 0) notes.push(`${response.failed} failed`);
     text.textContent = `${response.queued} files queued in background${
-      response.failed > 0 ? ` (${response.failed} failed)` : ''
+      notes.length ? ` (${notes.join(', ')})` : ''
     }`;
   } catch (err) {
     console.error('[ProfileDownloader] Batch download failed:', err);
