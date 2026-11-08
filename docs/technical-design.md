@@ -50,7 +50,7 @@ Background Service Worker
 6. Background 先持久化整个批次，再按 `maxConcurrent` 启动下载。
 7. `chrome.downloads.onChanged` 更新成功或失败计数，并继续消费队列。
 
-队列保存在 `chrome.storage.local` 的 `downloadQueueState` 中。Service Worker 再次启动时会对仍标记为活动状态的 Chrome 下载进行核对。
+队列保存在 `chrome.storage.local` 中：`downloadQueuePending` 存待下载列表，只在加入或乱序移除时重写；`downloadQueueState` 存计数、活动项和 `pendingConsumed`（已从列表头部取走的数量），启动每个下载只写这个小对象。并发写入会合并为一次。Service Worker 再次启动时会对仍标记为活动状态的 Chrome 下载进行核对。
 
 ### 防止重复下载
 
@@ -58,7 +58,8 @@ Background Service Worker
 
 - 同一批次内、或已在队列（pending/active）中的相同路径直接跳过。
 - 成功完成的路径记录在 `chrome.storage.local` 的 `downloadHistory` 中（路径 → Chrome 下载 ID），Service Worker 重启后仍有效。
-- 历史中没有记录时，再用 `chrome.downloads.search` 按路径匹配 Chrome 已完成的下载，兼容启用此功能前已下载的文件。
+- 历史中没有记录时，再按路径匹配 Chrome 已完成的下载，兼容启用此功能前已下载的文件。整批只调用一次 `chrome.downloads.search`，在内存中按路径后缀建索引。
+- 历史每 50 个完成或队列清空时写入一次；未写入的部分丢失也无妨，Chrome 的下载记录仍能识别这些文件。
 - 只有当 Chrome 明确报告文件已删除（`exists === false`）时才允许重新下载；Chrome 下载列表被清空不影响历史判断。
 - Popup 打开时会把已下载项标记为“✓ Downloaded”，下载时先排除这些项，避免 TikTok/抖音在页面内白白拉取视频。
 - `conflictAction` 使用 `overwrite`，相同路径不会再生成 `name (1).ext` 副本。

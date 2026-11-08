@@ -208,7 +208,10 @@ test('TikTok SPA navigation excludes stale initial state and links from another 
 function backgroundHarness(stored, history = {}, existingDownloads = []) {
   let nextId = 0;
   let persisted;
+  let persistedPending = [];
   let persistedHistory = history;
+  const searches = [];
+  let writes = 0;
   const started = [];
   const released = [];
   const downloads = new Map();
@@ -218,8 +221,10 @@ function backgroundHarness(stored, history = {}, existingDownloads = []) {
     URL, console: quiet, setTimeout,
     chrome: {
       storage: { local: {
-        async get(key, callback) { if (callback) callback({}); return { downloadQueueState: stored, downloadHistory: persistedHistory }; },
+        async get(key, callback) { if (callback) callback({}); return { downloadQueueState: stored, downloadHistory: JSON.parse(JSON.stringify(persistedHistory)) }; },
         async set(value) {
+          writes++;
+          if (value.downloadQueuePending) persistedPending = JSON.parse(JSON.stringify(value.downloadQueuePending));
           if (value.downloadQueueState) persisted = JSON.parse(JSON.stringify(value.downloadQueueState));
           if (value.downloadHistory) persistedHistory = JSON.parse(JSON.stringify(value.downloadHistory));
         },
@@ -237,17 +242,18 @@ function backgroundHarness(stored, history = {}, existingDownloads = []) {
         onUpdated: { addListener(fn) { callbacks.updated = fn; } },
       },
       downloads: {
-        async download(options) { started.push(options); const id = ++nextId; downloads.set(id, { state: 'in_progress' }); return id; },
-        async search({ id, filenameRegex }) {
-          if (filenameRegex) return existingDownloads.filter((d) => new RegExp(filenameRegex).test(d.filename));
-          return downloads.has(id) ? [downloads.get(id)] : [];
+        async download(options) { started.push(options); const id = ++nextId; downloads.set(id, { id, filename: `/home/me/Downloads/${options.filename}`, state: 'in_progress' }); return id; },
+        async search(query) {
+          searches.push(query);
+          if (query.id != null) return downloads.has(query.id) ? [downloads.get(query.id)] : [];
+          return [...existingDownloads, ...downloads.values()].filter((d) => !query.state || d.state === query.state);
         },
         onChanged: { addListener() {} },
       },
     },
   });
   vm.runInContext(source('background.js'), context);
-  return { context, started, released, callbacks, downloads, invalidateSource() { sourceValid = false; }, persisted: () => persisted, history: () => persistedHistory, run: (code) => vm.runInContext(code, context) };
+  return { context, started, released, callbacks, downloads, searches, writes: () => writes, invalidateSource() { sourceValid = false; }, persisted: () => persisted && { ...persisted, pending: persistedPending.slice(persisted.pendingConsumed || 0) }, history: () => persistedHistory, run: (code) => vm.runInContext(code, context) };
 }
 
 test('prepared and ordinary batches share the limit and advance on completion/failure', async () => {
@@ -289,7 +295,9 @@ test('duplicate paths are skipped while queued, after completion, and across res
   assert.equal(result.skipped, 1, 'in-flight duplicate');
   bg.downloads.get(1).state = 'complete';
   await bg.run('settleQueuedDownload(1, false)');
-  assert.equal(bg.history()['ProfileDownloader/x/alice_A/a.jpg'], 1);
+  assert.equal(bg.history()['ProfileDownloader/x/alice_A/a.jpg'], undefined, 'saved in groups');
+  await bg.run('settleQueuedDownload(2, false)');
+  assert.equal(bg.history()['ProfileDownloader/x/alice_A/a.jpg'], 1, 'saved when the queue drains');
   result = await bg.run(`enqueueDownloadBatch([${item('a')}])`);
   assert.equal(result.skipped, 1, 'completed duplicate');
   assert.deepEqual(Array.from(await bg.run(`findDownloadedFilenames(['x/alice_A/a.jpg', 'x/alice_A/b.jpg', 'x/alice_A/c.jpg'])`)), ['x/alice_A/a.jpg', 'x/alice_A/b.jpg']);
@@ -302,9 +310,44 @@ test('duplicate paths are skipped while queued, after completion, and across res
   result = await restarted.run(`enqueueDownloadBatch([${item('a')}])`);
   assert.equal(result.skipped, 1);
   // A file Chrome reports as deleted may be downloaded again.
-  restarted.downloads.set(1, { state: 'complete', exists: false });
+  restarted.downloads.set(1, { id: 1, filename: '/home/me/Downloads/ProfileDownloader/x/alice_A/a.jpg', state: 'complete', exists: false });
   result = await restarted.run(`enqueueDownloadBatch([${item('a')}])`);
   assert.equal(result.queued, 1);
+});
+
+test('1000-item batches check duplicates with one search and coalesce storage writes', async () => {
+  const existing = Array.from({ length: 300 }, (_, i) => ({ id: 10000 + i, filename: `/home/me/Downloads/ProfileDownloader/x/alice_A/${i}.jpg`, state: 'complete', exists: true }));
+  const bg = backgroundHarness(undefined, {}, existing);
+  await flush();
+  const items = JSON.stringify(Array.from({ length: 1000 }, (_, i) => ({ id: String(i), url: `https://cdn.example.com/${i}.jpg`, filename: `x/alice_A/${i}.jpg` })));
+  const names = JSON.stringify(Array.from({ length: 1000 }, (_, i) => `x/alice_A/${i}.jpg`));
+  assert.equal((await bg.run(`findDownloadedFilenames(${names})`)).length, 300);
+  assert.equal(bg.searches.length, 1);
+  const writesBefore = bg.writes();
+  const result = await bg.run(`enqueueDownloadBatch(${items})`);
+  assert.equal(result.queued, 700);
+  assert.equal(result.skipped, 300);
+  assert.equal(bg.searches.length, 2);
+  await flush(); await flush();
+  assert.equal(bg.started.length, 3);
+  assert.ok(bg.writes() - writesBefore <= 4, `expected coalesced writes, got ${bg.writes() - writesBefore}`);
+  assert.equal(bg.persisted().pending.length, 697);
+});
+
+test('a download that finishes before its ID is returned still frees its slot', async () => {
+  const bg = backgroundHarness();
+  await flush();
+  const download = bg.context.chrome.downloads.download;
+  bg.context.chrome.downloads.download = async (options) => {
+    const id = await download(options);
+    bg.run(`settleQueuedDownload(${id}, false)`);
+    return id;
+  };
+  await bg.run(`enqueueDownloadBatch(Array.from({ length: 5 }, (_, i) => ({ id: String(i), url: 'blob:https://www.tiktok.com/' + i, filename: i + '.mp4' })), 1)`);
+  for (let i = 0; i < 20; i++) await flush();
+  const status = await bg.run('getDownloadQueueStatus()');
+  assert.equal(status.active, 0);
+  assert.equal(status.completed, 5);
 });
 
 test('files already in Chrome downloads are skipped and skipped blobs are released', async () => {

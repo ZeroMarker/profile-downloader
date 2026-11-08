@@ -13,6 +13,12 @@ let settings = {
 };
 
 const DOWNLOAD_QUEUE_KEY = 'downloadQueueState';
+// The pending list is stored under its own key and rewritten only when items
+// are added or removed out of order. Starting a download just advances
+// pendingConsumed, so a 1000-item queue is not re-serialized per file.
+const DOWNLOAD_PENDING_KEY = 'downloadQueuePending';
+let pendingDirty = false;
+let pendingConsumed = 0;
 let downloadQueueState = {
   pending: [],
   active: {},
@@ -21,6 +27,9 @@ let downloadQueueState = {
   lastError: null,
 };
 let queuePumpRunning = false;
+// Downloads can finish (e.g. a local blob) before chrome.downloads.download()
+// resolves with their ID; remember those results until the item is tracked.
+const earlySettled = new Map();
 const downloadQueueLoaded = loadDownloadQueueState();
 
 // Completed downloads keyed by their saved path ("ProfileDownloader/x/alice_A/123.jpg").
@@ -44,14 +53,25 @@ chrome.storage?.local.get(['downloadPath', 'maxConcurrent'], (result) => {
 });
 
 async function loadDownloadQueueState() {
-  const stored = await chrome.storage.local.get(DOWNLOAD_QUEUE_KEY);
+  const stored = await chrome.storage.local.get([DOWNLOAD_QUEUE_KEY, DOWNLOAD_PENDING_KEY]);
   const state = stored?.[DOWNLOAD_QUEUE_KEY];
   if (!state) return;
 
+  let pending;
+  if (Array.isArray(state.pending)) {
+    // Older format kept the pending list inside the queue state.
+    pending = state.pending;
+    pendingDirty = true;
+  } else {
+    const snapshot = Array.isArray(stored?.[DOWNLOAD_PENDING_KEY]) ? stored[DOWNLOAD_PENDING_KEY] : [];
+    pendingConsumed = Math.max(0, Number(state.pendingConsumed) || 0);
+    pending = snapshot.slice(pendingConsumed);
+  }
+  const valid = pending.filter((item) => !isTikTokWebEndpoint(item?.url));
+  if (valid.length !== pending.length) pendingDirty = true;
+
   downloadQueueState = {
-    pending: Array.isArray(state.pending)
-      ? state.pending.filter((item) => !isTikTokWebEndpoint(item?.url))
-      : [],
+    pending: valid,
     active: state.active && typeof state.active === 'object' ? state.active : {},
     completed: Number(state.completed) || 0,
     failed: Number(state.failed) || 0,
@@ -67,12 +87,45 @@ async function loadDownloadHistory() {
   } catch (_) {}
 }
 
-async function persistDownloadHistory() {
+/**
+ * Coalesce storage writes: while one write is in flight, later calls only mark
+ * the value dirty and share a single follow-up write of the latest state.
+ * Every caller's promise resolves once a write containing its change lands.
+ */
+function createCoalescedWriter(getEntries) {
+  let inFlight = null;
+  let dirty = false;
+  return function write() {
+    dirty = true;
+    if (!inFlight) {
+      inFlight = (async () => {
+        try {
+          while (dirty) {
+            dirty = false;
+            await chrome.storage.local.set(getEntries());
+          }
+        } finally {
+          inFlight = null;
+        }
+      })();
+    }
+    return inFlight;
+  };
+}
+
+const writeDownloadHistory = createCoalescedWriter(() => ({ [DOWNLOAD_HISTORY_KEY]: downloadHistory }));
+// Completions are saved in groups. Losing an unsaved group is harmless:
+// Chrome's own download records still identify those files as downloaded.
+const HISTORY_SAVE_EVERY = 50;
+let unsavedHistory = 0;
+
+function persistDownloadHistory() {
+  unsavedHistory = 0;
   const keys = Object.keys(downloadHistory);
   if (keys.length > DOWNLOAD_HISTORY_LIMIT) {
     keys.slice(0, keys.length - DOWNLOAD_HISTORY_LIMIT).forEach((key) => delete downloadHistory[key]);
   }
-  await chrome.storage.local.set({ [DOWNLOAD_HISTORY_KEY]: downloadHistory });
+  return writeDownloadHistory();
 }
 
 async function recordCompletedDownload(item, downloadId) {
@@ -80,48 +133,63 @@ async function recordCompletedDownload(item, downloadId) {
   await downloadHistoryLoaded;
   delete downloadHistory[item.path];
   downloadHistory[item.path] = downloadId;
-  await persistDownloadHistory();
+  unsavedHistory++;
+  const idle = !downloadQueueState.pending.length && !Object.keys(downloadQueueState.active).length;
+  if (idle || unsavedHistory >= HISTORY_SAVE_EVERY) await persistDownloadHistory();
 }
 
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function trailingSegments(filename, count) {
+  const parts = String(filename || '').replace(/\\/g, '/').split('/');
+  return parts.length < count ? null : parts.slice(-count).join('/');
 }
 
 /**
- * True when this path was already saved and Chrome does not report the file
- * as deleted. Also recognizes files downloaded before history was recorded.
+ * Build a duplicate checker for many paths with one chrome.downloads.search
+ * call. A path counts as downloaded when history has it and Chrome does not
+ * report the file as deleted, or when Chrome has a completed download saved
+ * at that path (covers files downloaded before history was recorded).
  */
-async function isAlreadyDownloaded(path) {
+async function createDownloadedChecker(paths) {
   await downloadHistoryLoaded;
-  if (Object.prototype.hasOwnProperty.call(downloadHistory, path)) {
-    try {
-      const [record] = await chrome.downloads.search({ id: Number(downloadHistory[path]) });
+  const byId = new Map();
+  const bySuffix = new Map();
+  try {
+    const records = await chrome.downloads.search({ state: 'complete', limit: 0 });
+    const depths = new Set(paths.map((path) => path.split('/').length));
+    for (const record of records || []) {
+      byId.set(record.id, record);
+      if (record.exists === false) continue;
+      for (const depth of depths) {
+        const suffix = trailingSegments(record.filename, depth);
+        if (suffix && !bySuffix.has(suffix)) bySuffix.set(suffix, record.id);
+      }
+    }
+  } catch (_) {
+    // Without Chrome's records, fall back to trusting history alone.
+  }
+
+  let historyChanged = false;
+  const isDownloaded = (path) => {
+    if (Object.prototype.hasOwnProperty.call(downloadHistory, path)) {
+      const record = byId.get(Number(downloadHistory[path]));
       // A missing record only means the Chrome list was cleared; keep trusting history.
       if (!record || record.exists !== false) return true;
-    } catch (_) {
-      return true;
+      delete downloadHistory[path];
+      historyChanged = true;
     }
-    delete downloadHistory[path];
-    await persistDownloadHistory();
-    return false;
-  }
-
-  try {
-    const pattern = `(^|[\\\\/])${path.split('/').map(escapeRegex).join('[\\\\/]')}$`;
-    const matches = await chrome.downloads.search({ filenameRegex: pattern, state: 'complete' });
-    const existing = matches.find((download) => download.exists !== false);
-    if (!existing) return false;
-    downloadHistory[path] = existing.id;
-    await persistDownloadHistory();
+    if (!bySuffix.has(path)) return false;
+    downloadHistory[path] = bySuffix.get(path);
+    historyChanged = true;
     return true;
-  } catch (_) {
-    return false;
-  }
+  };
+  const save = () => (historyChanged ? persistDownloadHistory() : Promise.resolve());
+  return { isDownloaded, save };
 }
 
-function isPathQueued(path) {
-  return downloadQueueState.pending.some((item) => item.path === path)
-    || Object.values(downloadQueueState.active).some((item) => item.path === path);
+function queuedPaths() {
+  const paths = new Set(downloadQueueState.pending.map((item) => item.path));
+  Object.values(downloadQueueState.active).forEach((item) => paths.add(item.path));
+  return paths;
 }
 
 /**
@@ -130,11 +198,11 @@ function isPathQueued(path) {
 async function findDownloadedFilenames(filenames) {
   if (!Array.isArray(filenames)) return [];
   await downloadQueueLoaded;
-  const found = [];
-  for (const filename of filenames) {
-    const path = resolveDownloadPath(filename);
-    if (isPathQueued(path) || await isAlreadyDownloaded(path)) found.push(filename);
-  }
+  const paths = filenames.map(resolveDownloadPath);
+  const queued = queuedPaths();
+  const checker = await createDownloadedChecker(paths);
+  const found = filenames.filter((filename, index) => queued.has(paths[index]) || checker.isDownloaded(paths[index]));
+  await checker.save();
   return found;
 }
 
@@ -153,9 +221,17 @@ function isTikTokWebEndpoint(rawUrl) {
   }
 }
 
-async function persistDownloadQueue() {
-  await chrome.storage.local.set({ [DOWNLOAD_QUEUE_KEY]: downloadQueueState });
-}
+const persistDownloadQueue = createCoalescedWriter(() => {
+  const { pending, ...rest } = downloadQueueState;
+  const entries = { [DOWNLOAD_QUEUE_KEY]: { ...rest, pendingConsumed } };
+  if (pendingDirty) {
+    entries[DOWNLOAD_PENDING_KEY] = pending.slice();
+    entries[DOWNLOAD_QUEUE_KEY].pendingConsumed = 0;
+    pendingConsumed = 0;
+    pendingDirty = false;
+  }
+  return entries;
+});
 
 /**
  * Inject video URL extraction code into the page's main world context.
@@ -349,17 +425,19 @@ async function enqueueDownloadBatchNow(items, sourceTabId, sourceDocumentId) {
   const accepted = [];
   const errors = [];
   const skippedIds = [];
-  const batchPaths = new Set();
+  const seenPaths = queuedPaths();
+  const paths = items.map((item) => resolveDownloadPath(item?.filename));
+  const checker = await createDownloadedChecker(paths);
 
   for (const [index, item] of items.entries()) {
     try {
       validateDownloadUrl(item.url);
-      const path = resolveDownloadPath(item.filename);
-      if (batchPaths.has(path) || isPathQueued(path) || await isAlreadyDownloaded(path)) {
+      const path = paths[index];
+      if (seenPaths.has(path) || checker.isDownloaded(path)) {
         skippedIds.push(item.id);
         continue;
       }
-      batchPaths.add(path);
+      seenPaths.add(path);
       accepted.push({
         queueId: `${batchId}_${index}`,
         batchId,
@@ -379,7 +457,8 @@ async function enqueueDownloadBatchNow(items, sourceTabId, sourceDocumentId) {
     downloadQueueState.lastError = null;
   }
   downloadQueueState.pending.push(...accepted);
-  if (accepted.length) await persistDownloadQueue();
+  if (accepted.length) pendingDirty = true;
+  await Promise.all([accepted.length ? persistDownloadQueue() : null, checker.save()]);
   pumpDownloadQueue();
 
   return {
@@ -425,6 +504,7 @@ async function invalidatePreparedDownloads(tabId) {
   const stale = downloadQueueState.pending.filter((item) => item.sourceTabId === tabId && item.url.startsWith('blob:'));
   if (!stale.length) return;
   downloadQueueState.pending = downloadQueueState.pending.filter((item) => !stale.includes(item));
+  pendingDirty = true;
   downloadQueueState.failed += stale.length;
   downloadQueueState.lastError = PREPARED_SOURCE_ERROR;
   await persistDownloadQueue();
@@ -461,24 +541,33 @@ async function pumpDownloadQueue() {
   try {
     await downloadQueueLoaded;
     const limit = Math.max(1, Math.min(10, Number(settings.maxConcurrent) || 3));
+    let started = null;
 
     while (
       downloadQueueState.pending.length > 0
       && Object.keys(downloadQueueState.active).length < limit
     ) {
       const item = downloadQueueState.pending.shift();
+      pendingConsumed++;
       try {
         await validatePreparedBlob(item);
         const downloadId = await handleDownload(item.url, item.filename);
         downloadQueueState.active[String(downloadId)] = item;
+        if (earlySettled.has(downloadId)) {
+          const failed = earlySettled.get(downloadId);
+          earlySettled.delete(downloadId);
+          settleQueuedDownload(downloadId, failed);
+        }
       } catch (err) {
         downloadQueueState.failed++;
         downloadQueueState.lastError = err.message || 'Download failed';
         await releasePreparedBlob(item);
         console.error(`[ProfileDownloader] Could not start ${item.id}:`, err);
       }
-      await persistDownloadQueue();
+      // Coalesced: no await, so a long queue does not wait on one write per item.
+      started = persistDownloadQueue();
     }
+    await started;
   } finally {
     queuePumpRunning = false;
   }
@@ -487,7 +576,10 @@ async function pumpDownloadQueue() {
 async function settleQueuedDownload(downloadId, failed) {
   await downloadQueueLoaded;
   const key = String(downloadId);
-  if (!downloadQueueState.active[key]) return;
+  if (!downloadQueueState.active[key]) {
+    if (queuePumpRunning) earlySettled.set(Number(downloadId), failed);
+    return;
+  }
 
   const item = downloadQueueState.active[key];
   delete downloadQueueState.active[key];
