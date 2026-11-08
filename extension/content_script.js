@@ -587,9 +587,20 @@
 
   function getTwitterProfile(username) {
     const info = { username };
-    const nameEl = document.querySelector('[data-testid="UserCell"] span, h2[role="heading"] a span');
-    if (nameEl) info.display_name = nameEl.textContent.trim();
-    const avatarEl = document.querySelector('img[src*="pbs.twimg.com/profile_images"]');
+    // Only read the profile header: page-wide selectors hit the hidden "View keyboard
+    // shortcuts" heading, "Who to follow" cells, or the logged-in user's nav avatar.
+    const column = document.querySelector('[data-testid="primaryColumn"]');
+    const header = column?.querySelector('[data-testid="UserName"]');
+    const headerName = header?.querySelector('span')?.textContent.trim();
+    if (headerName && !headerName.startsWith('@')) {
+      info.display_name = headerName;
+    } else {
+      // Title format: "Display Name (@handle) / X" — trust it only for this handle.
+      const m = document.title.match(/^(.+?) \(@([^)]+)\)/);
+      if (m && m[2].toLowerCase() === String(username).toLowerCase()) info.display_name = m[1].trim();
+    }
+    const avatarEl = Array.from(column?.querySelectorAll('a[href$="/photo"] img[src*="pbs.twimg.com/profile_images"]') || [])
+      .find(img => img.closest('a').getAttribute('href').toLowerCase() === `/${String(username).toLowerCase()}/photo`);
     if (avatarEl) info.avatar_url = avatarEl.src;
     return info;
   }
