@@ -99,11 +99,12 @@ profile-downloader/
 │   └── wasm/                    # wasm-pack 构建输出
 ├── docs/
 │   ├── technical-design.md      # 架构、数据流与安全边界
-│   └── development-plan.md      # 当前状态与后续计划
+│   ├── development-plan.md      # 当前状态与后续计划
+│   └── webtop-environment.md    # Webtop 调试环境与浏览器选型
 └── .github/workflows/           # CI 与发布流程
 ```
 
-更详细的实现说明见[技术设计文档](docs/technical-design.md)，项目状态见[开发计划](docs/development-plan.md)。
+更详细的实现说明见[技术设计文档](docs/technical-design.md)，项目状态见[开发计划](docs/development-plan.md)，在 webtop 容器中调试见[Webtop 开发环境](docs/webtop-environment.md)。
 
 ## 发布
 
