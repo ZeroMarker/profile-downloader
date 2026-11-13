@@ -6,7 +6,7 @@ Profile Media Downloader
 
 ## Summary (132 characters or fewer)
 
-Preview and batch-download accessible media already loaded on supported profile pages.
+Preview and batch-download images and videos already loaded on supported profile pages.
 
 ## Detailed description
 
@@ -28,7 +28,7 @@ How to use:
 3. Open the extension from the Chrome toolbar.
 4. Select media and start the download.
 
-Supported services are X / Twitter, TikTok, Instagram, Weibo, and OnlyFans. Website layouts change over time. If a scan is incomplete, load more content and try again.
+Website layouts change over time. If a scan is incomplete, load more content and try again. Some supported services require you to sign in before you can view or download media.
 
 This extension does not unlock content, bypass paywalls, or access media unavailable to your current account. Download only content you are entitled to save, and follow applicable service terms, creator rights, and local law. This extension is not affiliated with, sponsored by, or endorsed by any supported service.
 
