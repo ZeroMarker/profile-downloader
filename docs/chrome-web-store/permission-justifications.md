@@ -20,7 +20,7 @@ Injects a small, packaged script into the current supported page's MAIN world wh
 
 ## `declarativeNetRequestWithHostAccess`
 
-Applies a packaged static rule for Weibo media requests so user-selected media can be downloaded successfully with the referer expected by the media host.
+Applies packaged static rules to supported media hosts so user-selected media requests carry the referer expected by those hosts. The current rule files cover Weibo and Douyin media downloads.
 
 ## Host permissions
 
@@ -30,7 +30,7 @@ Access is limited to the supported profile services and their media CDNs. It is 
 
 Allows optional scanning of a profile page that the user has explicitly saved and opened as a local HTML file. Chrome requires the user to separately enable “Allow access to file URLs.”
 
-## `webRequest`
+## 已移除的 `webRequest`
 
-The current JavaScript does not call the `chrome.webRequest` API. Remove this permission before submission unless a verified runtime path requires it; Chrome Web Store policy requires the narrowest permission set.
+1.0.2 的 Manifest 未声明 `webRequest`，代码也不调用该 API。不要将旧版本文档中的此项复制到当前权限说明。当前权限以 `extension/manifest.json` 为准。
 

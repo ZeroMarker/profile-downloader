@@ -35,7 +35,7 @@ This extension does not unlock content, bypass paywalls, or access media unavail
 ## Category and language
 
 - Suggested category: Tools
-- Default language: Simplified Chinese (add English as a localized listing)
+- Store language used in the 2026-11-13 submission: English; Chinese copy is available separately for a future localized listing
 - Mature content: Yes (because the extension integrates with an adult-oriented site; listing assets must remain non-explicit)
 
 ## URLs

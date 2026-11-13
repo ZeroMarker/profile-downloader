@@ -5,6 +5,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/ZeroMarker/profile-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/ZeroMarker/profile-downloader/actions/workflows/ci.yml)
 
+## 版本与商店状态
+
+2026-11-13 最后核对：扩展版本为 **1.0.2**，Chrome 应用商店状态为**待审核**，已开启**审核通过后自动发布**，尚未确认上架。
+
+本次修正了商店审核指出的描述关键词堆砌：摘要和详细说明改为介绍实际功能与使用步骤。扩展 ID 为 `jpdiaigjgblmajgkjnpliddppepgacai`。版本记录、验证范围和上传包校验值见[商店提交记录](docs/chrome-web-store/submission-history.md)。
+
 ## 支持的平台
 
 | 平台 | 主页示例 | 说明 |
@@ -40,7 +46,7 @@ TikTok 下载期间请保持源标签页打开。关闭或刷新源页面会将�
 3. 开启右上角的「开发者模式」。
 4. 点击「加载已解压的扩展程序」，选择解压后的目录。
 
-> Chrome 应用商店版本尚未发布。
+> Chrome 应用商店 1.0.2 已送审，审核通过后自动发布；在确认上架前可继续使用 GitHub Release 或源码安装。
 
 ### 从源码构建
 
@@ -103,20 +109,23 @@ profile-downloader/
 └── .github/workflows/           # CI 与发布流程
 ```
 
-更详细的实现说明见[技术设计文档](docs/technical-design.md)，项目状态见[开发计划](docs/development-plan.md)。
+更详细的实现说明见[技术设计文档](docs/technical-design.md)，项目状态见[开发计划](docs/development-plan.md)，商店材料见[提交清单](docs/chrome-web-store/submission-checklist.md)。
 
 ## 发布
 
 发布标签必须与 `extension/manifest.json` 中的版本一致：
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+release_version=$(node -p "require('./extension/manifest.json').version")
+git tag "v$release_version"
+git push origin "v$release_version"
 ```
 
 Release 工作流会执行质量检查、构建 WASM、打包扩展，并上传 ZIP 与 SHA-256 校验文件。
 
 也可以在 GitHub 的 **Actions → Release → Run workflow** 中输入已推送的标签（例如 `v1.0.0`）手动发布或重试。工作流会检出该标签，核对扩展版本，并排除 Chrome 生成的 `_metadata`。重试已有 Release 时会更新同名 ZIP 和校验文件。
+
+GitHub Release 与 Chrome 应用商店是独立流程。1.0.2 本次使用本地构建 ZIP 上传商店，未创建 `v1.0.2` 标签或 GitHub Release；不要把商店送审状态当作已发布的 GitHub 版本。
 
 ## 贡献
 

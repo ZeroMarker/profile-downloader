@@ -134,10 +134,9 @@ Manifest 当前使用的关键权限：
 | `downloads` | 保存媒体文件并跟踪下载状态 |
 | `storage` | 保存设置和下载队列 |
 | `scripting` | 在需要时向页面主环境注入提取逻辑 |
-| `webRequest` | 观察媒体请求 |
-| `declarativeNetRequestWithHostAccess` | 为特定媒体请求应用声明式规则 |
+| `declarativeNetRequestWithHostAccess` | 为微博和抖音媒体请求应用打包在扩展内的静态 Referer 规则 |
 
-站点访问范围由 `host_permissions` 和 `content_scripts.matches` 明确列出。`file:///*` 用于调试本地保存的页面；Chrome 默认不会授予文件 URL 访问权限，需要用户在扩展详情页手动开启。
+站点访问范围由 `host_permissions` 和 `content_scripts.matches` 明确列出。`file:///*` 用于可选扫描用户保存的本地 HTML 页面；Chrome 默认不会授予文件 URL 访问权限，需要用户在扩展详情页手动开启。
 
 安全约束：
 
