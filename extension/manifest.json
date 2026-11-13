@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Profile Media Downloader",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Download accessible profile media from X/Twitter, TikTok, Douyin, Instagram, Weibo, and OnlyFans — powered by Rust WASM",
   "author": "Mark Chen",
   "homepage_url": "https://github.com/ZeroMarker/profile-downloader",

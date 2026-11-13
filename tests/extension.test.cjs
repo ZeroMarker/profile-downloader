@@ -109,6 +109,7 @@ function contentHarness(initialPath = '/alice') {
   let imageOwner = 'alice';
   const location = { hostname: 'x.com', origin: 'https://x.com', protocol: 'https:', pathname: initialPath, href: 'https://x.com' + initialPath };
   const document = {
+    title: '',
     documentElement: { innerHTML: '' }, body: {},
     querySelector: () => null,
     querySelectorAll: (selector) => selector === 'img[src*="pbs.twimg.com/media"], img[data-src*="pbs.twimg.com/media"]'
