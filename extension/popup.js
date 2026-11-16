@@ -33,6 +33,40 @@ const sections = {
 };
 
 /**
+ * Translate a UI string through chrome.i18n. Falls back to the message key
+ * when translations are unavailable (e.g. unit tests).
+ */
+function t(key, substitutions) {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.i18n?.getMessage) {
+      const message = chrome.i18n.getMessage(key, substitutions);
+      if (message) return message;
+    }
+  } catch (_) {}
+  return key;
+}
+
+/**
+ * Apply the locale catalog to the static popup markup.
+ */
+function localizeStaticUi() {
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll('[data-i18n-alt]').forEach((el) => {
+    el.setAttribute('alt', t(el.dataset.i18nAlt));
+  });
+  try {
+    const language = chrome.i18n?.getUILanguage?.();
+    if (language) document.documentElement.lang = language;
+  } catch (_) {}
+  document.title = t('extName');
+  const count = $('#media-count');
+  if (count) count.textContent = t('mediaCount', ['0']);
+  updateDownloadButton();
+}
+
+/**
  * Initialize WASM module via dynamic import.
  * If this fails, we fall back to JS — never blocks the popup.
  */
@@ -103,7 +137,7 @@ function sendMessageWithTimeout(tabId, message, timeoutMs = 5000) {
       clearTimeout(timer);
       const err = chrome.runtime.lastError;
       if (err) {
-        reject(new Error(err.message || 'Content script error'));
+        reject(new Error(err.message || t('contentScriptError')));
       } else {
         resolve(response);
       }
@@ -123,13 +157,14 @@ function isRecoverableContentScriptError(err) {
  * WASM is loaded in the background and never blocks the UI.
  */
 async function init() {
+  localizeStaticUi();
   // Start loading WASM in background (non-blocking)
   initWasm();
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.url) {
-      showError('No active tab detected.');
+      showError(t('noActiveTab'));
       return;
     }
 
@@ -165,7 +200,7 @@ async function init() {
     }
 
     if (!platform) {
-      showError('Not on a supported platform. Open X, TikTok, Douyin, Instagram, Weibo, or OnlyFans.');
+      showError(t('unsupportedPlatform'));
       return;
     }
 
@@ -174,22 +209,22 @@ async function init() {
 
     // Show platform badge immediately
     const badges = {
-      twitter: ['🐦', 'X / Twitter'],
-      tiktok: ['🎵', 'TikTok'],
-      douyin: ['🎵', '抖音 / Douyin'],
-      instagram: ['📸', 'Instagram'],
-      onlyfans: ['🔐', 'OnlyFans'],
-      weibo: ['🧣', '微博 / Weibo'],
+      twitter: ['🐦', 'platformTwitter'],
+      tiktok: ['🎵', 'platformTiktok'],
+      douyin: ['🎵', 'platformDouyin'],
+      instagram: ['📸', 'platformInstagram'],
+      onlyfans: ['🔐', 'platformOnlyfans'],
+      weibo: ['🧣', 'platformWeibo'],
     };
-    const [icon, label] = badges[platform] || ['❓', platform];
-    updatePlatformBadge(icon, label);
+    const [icon, labelKey] = badges[platform] || ['❓', null];
+    updatePlatformBadge(icon, labelKey ? t(labelKey) : platform);
 
     // Check if we're on a profile page (not homepage/feed)
     // For file:// URLs, skip this check — content script handles it
     if (!isFileUrl) {
       const pathSegments = url.pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
       if (pathSegments.length === 0) {
-        showError('Please navigate to a user profile page first.');
+        showError(t('navigateToProfile'));
         return;
       }
     }
@@ -219,14 +254,14 @@ async function init() {
       await refreshDownloadedMarks();
       await restoreDownloadState();
     } else {
-      showError('No media found on this page. Try scrolling down to load more content.');
+      showError(t('noMediaFound'));
     }
   } catch (err) {
     if (isRecoverableContentScriptError(err)) {
-      showError('Extension was updated. Refresh this page once, then open the extension again.');
+      showError(t('extensionUpdated'));
     } else {
       console.error('[ProfileDownloader] Init error:', err);
-      showError(err.message || 'Failed to initialize.');
+      showError(err.message || t('initFailed'));
     }
   }
 }
@@ -252,7 +287,7 @@ async function refreshDownloadedMarks() {
   const count = $('#media-count');
   if (count && state.downloadedIds.size > 0) {
     const badge = state.wasmReady ? ' ⚡' : '';
-    count.textContent = `${state.mediaItems.length} items · ${state.downloadedIds.size} downloaded${badge}`;
+    count.textContent = t('mediaCountDownloaded', [String(state.mediaItems.length), String(state.downloadedIds.size)]) + badge;
   }
 }
 
@@ -278,7 +313,7 @@ async function restoreDownloadState() {
 }
 
 function downloadQueueText(status) {
-  const progress = `${status.pending || 0} queued, ${status.active || 0} downloading`;
+  const progress = t('queueProgress', [String(status.pending || 0), String(status.active || 0)]);
   return status.lastError ? `${progress}. ${status.lastError}` : progress;
 }
 
@@ -298,7 +333,7 @@ function monitorDownloads() {
       $('#download-all-btn').disabled = false;
       $('#select-all-btn').disabled = false;
       $('#progress-fill').style.width = '100%';
-      $('#progress-text').textContent = status.lastError || 'Downloads complete';
+      $('#progress-text').textContent = status.lastError || t('downloadsComplete');
       updateDownloadButton();
     } catch (_) {}
   }, 1000);
@@ -309,7 +344,7 @@ function monitorDownloads() {
  */
 function updatePlatformBadge(icon, text) {
   $('#platform-icon').textContent = icon;
-  $('#platform-text').textContent = `Detected: ${text}`;
+  $('#platform-text').textContent = t('platformDetected', [text]);
 }
 
 /**
@@ -320,13 +355,13 @@ function renderProfile(info) {
   sections.profile.classList.remove('hidden');
   const username = info.username || state.username || '';
   $('#profile-username').textContent = state.platform === 'douyin'
-    ? (username === info.profile_id ? `用户 ID：${username}` : `抖音号：${username}`)
+    ? (username === info.profile_id ? t('douyinUserId', [username]) : t('douyinHandle', [username]))
     : `@${username}`;
   $('#profile-display-name').textContent = info.display_name || '';
   const stats = [];
-  if (info.post_count != null) stats.push(`${info.post_count} posts`);
-  if (info.follower_count != null) stats.push(`${info.follower_count} followers`);
-  if (info.following_count != null) stats.push(`${info.following_count} following`);
+  if (info.post_count != null) stats.push(t('statPosts', [String(info.post_count)]));
+  if (info.follower_count != null) stats.push(t('statFollowers', [String(info.follower_count)]));
+  if (info.following_count != null) stats.push(t('statFollowing', [String(info.following_count)]));
   $('#profile-stats').textContent = stats.join(' · ');
   if (info.avatar_url) {
     $('#profile-avatar').src = info.avatar_url;
@@ -341,10 +376,10 @@ function renderMediaList(media) {
   const grid = $('#media-list');
   const count = $('#media-count');
   const badge = state.wasmReady ? ' ⚡' : '';
-  count.textContent = `${media.length} items${badge}`;
+  count.textContent = t('mediaCount', [String(media.length)]) + badge;
 
   if (media.length === 0) {
-    grid.innerHTML = '<div class="loading">No media found.</div>';
+    grid.innerHTML = `<div class="loading">${t('mediaEmpty')}</div>`;
     return;
   }
 
@@ -354,7 +389,7 @@ function renderMediaList(media) {
       const thumb = item.thumbnail_url || item.url;
       return `
         <div class="media-item" data-index="${index}" data-id="${item.id}">
-          <img src="${thumb}" alt="media" loading="lazy" class="media-thumbnail" />
+          <img src="${thumb}" alt="${t('mediaAlt')}" loading="lazy" class="media-thumbnail" />
           <span class="media-type-badge">${isVideo ? '🎬' : '🖼️'}</span>
           <span class="checkbox-overlay"></span>
         </div>
@@ -402,7 +437,7 @@ function updateDownloadButton() {
   const btn = $('#download-selected-btn');
   const count = state.selectedIds.size;
   btn.disabled = count === 0;
-  btn.textContent = `Download Selected (${count})`;
+  btn.textContent = t('downloadSelectedCount', [String(count)]);
 }
 
 /**
@@ -422,7 +457,7 @@ async function startDownload(selectedOnly) {
   if (items.length === 0) {
     sections.progress.classList.remove('hidden');
     $('#progress-fill').style.width = '100%';
-    $('#progress-text').textContent = `All ${requested.length} files were already downloaded`;
+    $('#progress-text').textContent = t('allAlreadyDownloaded', [String(requested.length)]);
     return;
   }
   state.isDownloading = true;
@@ -435,7 +470,7 @@ async function startDownload(selectedOnly) {
   const fill = $('#progress-fill');
   const text = $('#progress-text');
   fill.style.width = '15%';
-  text.textContent = `Adding ${items.length} files to Chrome downloads...`;
+  text.textContent = t('addingFiles', [String(items.length)]);
 
   try {
     const downloadItems = items.map((item) => ({
@@ -465,21 +500,21 @@ async function startDownload(selectedOnly) {
           items: downloadItems,
         });
     if (!response || response.error) {
-      throw new Error(response?.error || 'Could not start batch download');
+      throw new Error(response?.error || t('couldNotStart'));
     }
 
     fill.style.width = '100%';
     const skipped = alreadyDone + (response.skipped || 0);
     const notes = [];
-    if (skipped > 0) notes.push(`${skipped} already downloaded`);
-    if (response.failed > 0) notes.push(`${response.failed} failed`);
-    text.textContent = `${response.queued} files queued in background${
+    if (skipped > 0) notes.push(t('noteSkipped', [String(skipped)]));
+    if (response.failed > 0) notes.push(t('noteFailed', [String(response.failed)]));
+    text.textContent = `${t('queuedFiles', [String(response.queued)])}${
       notes.length ? ` (${notes.join(', ')})` : ''
     }`;
   } catch (err) {
     console.error('[ProfileDownloader] Batch download failed:', err);
     fill.style.width = '100%';
-    text.textContent = `Download failed: ${err.message || 'Unknown error'}`;
+    text.textContent = t('downloadFailed', [err.message || t('unknownError')]);
   }
 
   const queueStatus = await chrome.runtime.sendMessage({ action: 'getDownloadQueueStatus' });
@@ -497,7 +532,9 @@ async function startDownload(selectedOnly) {
 }
 
 /**
- * Generate a filename: {platform}/{username}_{nickname}/{id}.{ext}
+ * Generate a filename: {platform}/{username}_{nickname}/{id}.{ext}.
+ * When the profile has no display name the nickname segment is omitted:
+ * {platform}/{username}/{id}.{ext}.
  * Chrome downloads API creates subdirectories automatically.
  */
 function generateFilename(item) {
@@ -506,10 +543,14 @@ function generateFilename(item) {
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_')
     .replace(/[. ]+$/g, '') || fallback;
   const safeUsername = sanitize(item.username, 'unknown');
-  const safeId = sanitize(item.id, 'media');
-  const nickname = sanitize(item.display_name, '未命名');
+  // Ids scraped from media URLs already carry an extension (Instagram's
+  // "..._n.jpg"), which would otherwise produce "..._n.jpg.jpg".
+  const safeId = sanitize(item.id, 'media')
+    .replace(/(?:\.(?:jpe?g|png|gif|webp|webm|mp4|mov|m4v|mp3|m4a))+$/i, '') || 'media';
+  const nickname = sanitize(item.display_name, '');
   const platform = sanitize(item.platform, 'unknown');
-  return `${platform}/${safeUsername}_${nickname}/${safeId}.${ext}`;
+  const folder = nickname ? `${safeUsername}_${nickname}` : safeUsername;
+  return `${platform}/${folder}/${safeId}.${ext}`;
 }
 
 /**

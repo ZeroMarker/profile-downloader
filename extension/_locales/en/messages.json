@@ -1,0 +1,292 @@
+{
+  "extName": {
+    "message": "Profile Media Downloader"
+  },
+  "extDescription": {
+    "message": "Preview and batch-download images and videos already loaded on supported profile pages."
+  },
+  "extActionTitle": {
+    "message": "Profile Media Downloader"
+  },
+  "appTitle": {
+    "message": "Profile Media Downloader"
+  },
+  "subtitle": {
+    "message": "Download media from X / TikTok / Douyin / Instagram / Weibo / OnlyFans"
+  },
+  "detectingPlatform": {
+    "message": "Detecting platform..."
+  },
+  "mediaHeading": {
+    "message": "Media"
+  },
+  "selectAll": {
+    "message": "Select All"
+  },
+  "downloadSelectedCount": {
+    "message": "Download Selected ($COUNT$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "downloadAll": {
+    "message": "Download All"
+  },
+  "loadingMedia": {
+    "message": "Loading media..."
+  },
+  "downloadsHeading": {
+    "message": "Downloads"
+  },
+  "progressInitial": {
+    "message": "0 / 0 completed"
+  },
+  "errorOccurred": {
+    "message": "An error occurred"
+  },
+  "retry": {
+    "message": "Retry"
+  },
+  "avatarAlt": {
+    "message": "avatar"
+  },
+  "mediaAlt": {
+    "message": "media"
+  },
+  "contentScriptError": {
+    "message": "Content script error"
+  },
+  "noActiveTab": {
+    "message": "No active tab detected."
+  },
+  "unsupportedPlatform": {
+    "message": "Not on a supported platform. Open X, TikTok, Douyin, Instagram, Weibo, or OnlyFans."
+  },
+  "navigateToProfile": {
+    "message": "Please navigate to a user profile page first."
+  },
+  "noMediaFound": {
+    "message": "No media found on this page. Try scrolling down to load more content."
+  },
+  "extensionUpdated": {
+    "message": "Extension was updated. Refresh this page once, then open the extension again."
+  },
+  "initFailed": {
+    "message": "Failed to initialize."
+  },
+  "platformDetected": {
+    "message": "Detected: $PLATFORM$",
+    "placeholders": {
+      "platform": {
+        "content": "$1"
+      }
+    }
+  },
+  "platformTwitter": {
+    "message": "X / Twitter"
+  },
+  "platformTiktok": {
+    "message": "TikTok"
+  },
+  "platformDouyin": {
+    "message": "Douyin"
+  },
+  "platformInstagram": {
+    "message": "Instagram"
+  },
+  "platformOnlyfans": {
+    "message": "OnlyFans"
+  },
+  "platformWeibo": {
+    "message": "Weibo"
+  },
+  "douyinUserId": {
+    "message": "User ID: $ID$",
+    "placeholders": {
+      "id": {
+        "content": "$1"
+      }
+    }
+  },
+  "douyinHandle": {
+    "message": "Douyin ID: $ID$",
+    "placeholders": {
+      "id": {
+        "content": "$1"
+      }
+    }
+  },
+  "statPosts": {
+    "message": "$COUNT$ posts",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "statFollowers": {
+    "message": "$COUNT$ followers",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "statFollowing": {
+    "message": "$COUNT$ following",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "mediaCount": {
+    "message": "$COUNT$ items",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "mediaCountDownloaded": {
+    "message": "$TOTAL$ items · $DONE$ downloaded",
+    "placeholders": {
+      "total": {
+        "content": "$1"
+      },
+      "done": {
+        "content": "$2"
+      }
+    }
+  },
+  "mediaEmpty": {
+    "message": "No media found."
+  },
+  "allAlreadyDownloaded": {
+    "message": "All $COUNT$ files were already downloaded",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "addingFiles": {
+    "message": "Adding $COUNT$ files to Chrome downloads...",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "couldNotStart": {
+    "message": "Could not start batch download"
+  },
+  "queuedFiles": {
+    "message": "$COUNT$ files queued in background",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "noteSkipped": {
+    "message": "$COUNT$ already downloaded",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "noteFailed": {
+    "message": "$COUNT$ failed",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueProgress": {
+    "message": "$PENDING$ queued, $ACTIVE$ downloading",
+    "placeholders": {
+      "pending": {
+        "content": "$1"
+      },
+      "active": {
+        "content": "$2"
+      }
+    }
+  },
+  "downloadsComplete": {
+    "message": "Downloads complete"
+  },
+  "downloadFailed": {
+    "message": "Download failed: $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "unknownError": {
+    "message": "Unknown error"
+  },
+  "noMediaItems": {
+    "message": "No media items to download"
+  },
+  "preparedSource": {
+    "message": "TikTok source page was closed or refreshed. Reopen the profile and retry the affected videos."
+  },
+  "batchDownloadFailed": {
+    "message": "Batch download failed"
+  },
+  "downloadFailedPlain": {
+    "message": "Download failed"
+  },
+  "invalidPreparedDownload": {
+    "message": "Invalid prepared download"
+  },
+  "preparedNeedsSource": {
+    "message": "Prepared video requires a source tab"
+  },
+  "invalidMediaUrl": {
+    "message": "Invalid media URL"
+  },
+  "tiktokWebEndpoint": {
+    "message": "TikTok web endpoint is not a direct CDN video URL; refresh the page and scan again"
+  },
+  "incompleteXVideo": {
+    "message": "Incomplete X video stream detected; refresh the page and scan again"
+  },
+  "mediaDownloadFailed": {
+    "message": "Media download failed"
+  },
+  "couldNotStartMediaDownload": {
+    "message": "Could not start media download"
+  },
+  "mediaFetchTimeout": {
+    "message": "Media fetch timed out; keep the source page open and retry"
+  },
+  "onlyfansSourceTimeout": {
+    "message": "OnlyFans video source timed out"
+  },
+  "onlyfansTileUnavailable": {
+    "message": "OnlyFans video tile is no longer available or is locked"
+  },
+  "onlyfansResolutionRunning": {
+    "message": "OnlyFans video resolution is already running"
+  },
+  "couldNotStartOnlyfansDownload": {
+    "message": "Could not start OnlyFans download"
+  },
+  "noMediaDownloaded": {
+    "message": "No media could be downloaded"
+  },
+  "noOnlyfansVideos": {
+    "message": "No OnlyFans videos could be resolved"
+  },
+  "extractionFailed": {
+    "message": "Extraction failed"
+  }
+}

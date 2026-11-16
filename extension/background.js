@@ -6,6 +6,16 @@
 // Service Worker startup log — if you see this, the SW is alive
 console.log('[ProfileDownloader] Service Worker started');
 
+function t(key) {
+  try {
+    if (chrome.i18n?.getMessage) {
+      const message = chrome.i18n.getMessage(key);
+      if (message) return message;
+    }
+  } catch (_) {}
+  return key;
+}
+
 // Default settings (overwritten by chrome.storage on install)
 let settings = {
   downloadPath: 'ProfileDownloader',
@@ -292,7 +302,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         .then((downloadId) => sendResponse({ success: true, downloadId }))
         .catch((err) => {
           console.error('[ProfileDownloader] Download error:', err);
-          sendResponse({ success: false, error: err.message || 'Download failed' });
+          sendResponse({ success: false, error: err.message || t('downloadFailedPlain') });
         });
       return true; // Keep channel open for async response
 
@@ -301,14 +311,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         .then((result) => sendResponse({ success: true, ...result }))
         .catch((err) => {
           console.error('[ProfileDownloader] Batch download error:', err);
-          sendResponse({ success: false, error: err.message || 'Batch download failed' });
+          sendResponse({ success: false, error: err.message || t('batchDownloadFailed') });
         });
       return true;
 
     case 'downloadPreparedMedia':
       startPreparedDownload(request.item, sender.tab?.id, sender.documentId)
         .then((result) => sendResponse({ success: true, ...result }))
-        .catch((err) => sendResponse({ success: false, error: err.message || 'Download failed' }));
+        .catch((err) => sendResponse({ success: false, error: err.message || t('downloadFailedPlain') }));
       return true;
 
     case 'getDownloadedFilenames':
@@ -417,7 +427,7 @@ function enqueueDownloadBatch(items, sourceTabId, sourceDocumentId) {
 
 async function enqueueDownloadBatchNow(items, sourceTabId, sourceDocumentId) {
   if (!Array.isArray(items) || items.length === 0) {
-    throw new Error('No media items to download');
+    throw new Error(t('noMediaItems'));
   }
 
   await downloadQueueLoaded;
@@ -472,17 +482,17 @@ async function enqueueDownloadBatchNow(items, sourceTabId, sourceDocumentId) {
 }
 
 async function startPreparedDownload(item, sourceTabId, sourceDocumentId) {
-  if (!item?.url || !item?.filename) throw new Error('Invalid prepared download');
+  if (!item?.url || !item?.filename) throw new Error(t('invalidPreparedDownload'));
   validateDownloadUrl(item.url);
   if (item.url.startsWith('blob:') && sourceTabId == null) {
-    throw new Error('Prepared video requires a source tab');
+    throw new Error(t('preparedNeedsSource'));
   }
   const result = await enqueueDownloadBatch([item], sourceTabId, sourceDocumentId);
   if (result.skipped) await releasePreparedBlob({ ...item, sourceTabId, sourceDocumentId });
   return result;
 }
 
-const PREPARED_SOURCE_ERROR = 'TikTok source page was closed or refreshed. Reopen the profile and retry the affected videos.';
+const PREPARED_SOURCE_ERROR = t('preparedSource');
 
 function preparedMessageOptions(item) {
   return item.sourceDocumentId ? { documentId: item.sourceDocumentId } : {};
@@ -560,7 +570,7 @@ async function pumpDownloadQueue() {
         }
       } catch (err) {
         downloadQueueState.failed++;
-        downloadQueueState.lastError = err.message || 'Download failed';
+        downloadQueueState.lastError = err.message || t('downloadFailedPlain');
         await releasePreparedBlob(item);
         console.error(`[ProfileDownloader] Could not start ${item.id}:`, err);
       }
@@ -619,20 +629,20 @@ function validateDownloadUrl(rawUrl) {
   try {
     url = new URL(rawUrl);
   } catch (_) {
-    throw new Error('Invalid media URL');
+    throw new Error(t('invalidMediaUrl'));
   }
 
   if (isTikTokWebEndpoint(url.href)) {
-    throw new Error('TikTok web endpoint is not a direct CDN video URL; refresh the page and scan again');
+    throw new Error(t('tiktokWebEndpoint'));
   }
 
   if (url.hostname !== 'video.twimg.com') return;
   const path = url.pathname;
   if (path.includes('/aud/') || /\/vid\/(?:avc1|hevc)\/\d+\/\d+\//i.test(path)) {
-    throw new Error('Incomplete X video stream detected; refresh the page and scan again');
+    throw new Error(t('incompleteXVideo'));
   }
   if (/\/(?:init|segment|chunk)[^/]*\.mp4$/i.test(path)) {
-    throw new Error('Incomplete X video stream detected; refresh the page and scan again');
+    throw new Error(t('incompleteXVideo'));
   }
 }
 

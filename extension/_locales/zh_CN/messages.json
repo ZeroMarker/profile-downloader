@@ -1,0 +1,292 @@
+{
+  "extName": {
+    "message": "Profile Media Downloader"
+  },
+  "extDescription": {
+    "message": "预览并批量下载受支持的个人主页上已加载的图片和视频。"
+  },
+  "extActionTitle": {
+    "message": "Profile Media Downloader"
+  },
+  "appTitle": {
+    "message": "Profile Media Downloader"
+  },
+  "subtitle": {
+    "message": "从 X / TikTok / 抖音 / Instagram / 微博 / OnlyFans 下载媒体"
+  },
+  "detectingPlatform": {
+    "message": "正在识别平台..."
+  },
+  "mediaHeading": {
+    "message": "媒体"
+  },
+  "selectAll": {
+    "message": "全选"
+  },
+  "downloadSelectedCount": {
+    "message": "下载所选（$COUNT$）",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "downloadAll": {
+    "message": "全部下载"
+  },
+  "loadingMedia": {
+    "message": "正在加载媒体..."
+  },
+  "downloadsHeading": {
+    "message": "下载"
+  },
+  "progressInitial": {
+    "message": "已完成 0 / 0"
+  },
+  "errorOccurred": {
+    "message": "发生错误"
+  },
+  "retry": {
+    "message": "重试"
+  },
+  "avatarAlt": {
+    "message": "头像"
+  },
+  "mediaAlt": {
+    "message": "媒体缩略图"
+  },
+  "contentScriptError": {
+    "message": "内容脚本错误"
+  },
+  "noActiveTab": {
+    "message": "未检测到活动标签页。"
+  },
+  "unsupportedPlatform": {
+    "message": "当前不是受支持的平台。请打开 X、TikTok、抖音、Instagram、微博或 OnlyFans。"
+  },
+  "navigateToProfile": {
+    "message": "请先进入用户个人主页。"
+  },
+  "noMediaFound": {
+    "message": "此页面未找到媒体，请向下滚动加载更多内容后重试。"
+  },
+  "extensionUpdated": {
+    "message": "扩展已更新，请刷新此页面后重新打开扩展。"
+  },
+  "initFailed": {
+    "message": "初始化失败。"
+  },
+  "platformDetected": {
+    "message": "已识别：$PLATFORM$",
+    "placeholders": {
+      "platform": {
+        "content": "$1"
+      }
+    }
+  },
+  "platformTwitter": {
+    "message": "X / 推特"
+  },
+  "platformTiktok": {
+    "message": "TikTok"
+  },
+  "platformDouyin": {
+    "message": "抖音"
+  },
+  "platformInstagram": {
+    "message": "Instagram"
+  },
+  "platformOnlyfans": {
+    "message": "OnlyFans"
+  },
+  "platformWeibo": {
+    "message": "微博"
+  },
+  "douyinUserId": {
+    "message": "用户 ID：$ID$",
+    "placeholders": {
+      "id": {
+        "content": "$1"
+      }
+    }
+  },
+  "douyinHandle": {
+    "message": "抖音号：$ID$",
+    "placeholders": {
+      "id": {
+        "content": "$1"
+      }
+    }
+  },
+  "statPosts": {
+    "message": "$COUNT$ 条帖子",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "statFollowers": {
+    "message": "$COUNT$ 粉丝",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "statFollowing": {
+    "message": "$COUNT$ 关注",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "mediaCount": {
+    "message": "共 $COUNT$ 项",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "mediaCountDownloaded": {
+    "message": "共 $TOTAL$ 项 · 已下载 $DONE$ 项",
+    "placeholders": {
+      "total": {
+        "content": "$1"
+      },
+      "done": {
+        "content": "$2"
+      }
+    }
+  },
+  "mediaEmpty": {
+    "message": "未找到媒体。"
+  },
+  "allAlreadyDownloaded": {
+    "message": "$COUNT$ 个文件均已下载",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "addingFiles": {
+    "message": "正在将 $COUNT$ 个文件加入 Chrome 下载...",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "couldNotStart": {
+    "message": "无法开始批量下载"
+  },
+  "queuedFiles": {
+    "message": "已加入后台队列：$COUNT$ 个文件",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "noteSkipped": {
+    "message": "$COUNT$ 个已下载",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "noteFailed": {
+    "message": "$COUNT$ 个失败",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "queueProgress": {
+    "message": "队列 $PENDING$ 个，下载中 $ACTIVE$ 个",
+    "placeholders": {
+      "pending": {
+        "content": "$1"
+      },
+      "active": {
+        "content": "$2"
+      }
+    }
+  },
+  "downloadsComplete": {
+    "message": "下载完成"
+  },
+  "downloadFailed": {
+    "message": "下载失败：$ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "unknownError": {
+    "message": "未知错误"
+  },
+  "noMediaItems": {
+    "message": "没有可下载的媒体"
+  },
+  "preparedSource": {
+    "message": "TikTok 源页面已关闭或刷新。请重新打开该主页后重试受影响的视频。"
+  },
+  "batchDownloadFailed": {
+    "message": "批量下载失败"
+  },
+  "downloadFailedPlain": {
+    "message": "下载失败"
+  },
+  "invalidPreparedDownload": {
+    "message": "无效的预下载任务"
+  },
+  "preparedNeedsSource": {
+    "message": "预下载视频需要源标签页"
+  },
+  "invalidMediaUrl": {
+    "message": "无效的媒体链接"
+  },
+  "tiktokWebEndpoint": {
+    "message": "TikTok 网页地址不是直连 CDN 视频地址，请刷新页面后重新扫描"
+  },
+  "incompleteXVideo": {
+    "message": "检测到不完整的 X 视频流，请刷新页面后重新扫描"
+  },
+  "mediaDownloadFailed": {
+    "message": "媒体下载失败"
+  },
+  "couldNotStartMediaDownload": {
+    "message": "无法开始媒体下载"
+  },
+  "mediaFetchTimeout": {
+    "message": "媒体获取超时，请保持源页面打开后重试"
+  },
+  "onlyfansSourceTimeout": {
+    "message": "OnlyFans 视频源超时"
+  },
+  "onlyfansTileUnavailable": {
+    "message": "OnlyFans 视频卡片已不可用或已锁定"
+  },
+  "onlyfansResolutionRunning": {
+    "message": "OnlyFans 视频解析已在进行中"
+  },
+  "couldNotStartOnlyfansDownload": {
+    "message": "无法开始 OnlyFans 下载"
+  },
+  "noMediaDownloaded": {
+    "message": "没有可下载的媒体"
+  },
+  "noOnlyfansVideos": {
+    "message": "未能解析任何 OnlyFans 视频"
+  },
+  "extractionFailed": {
+    "message": "提取失败"
+  }
+}

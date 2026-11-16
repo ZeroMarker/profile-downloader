@@ -8,6 +8,22 @@ const source = (name) => fs.readFileSync(path.join(__dirname, '../extension', na
 const quiet = { log() {}, warn() {}, error() {} };
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+const enMessages = JSON.parse(fs.readFileSync(path.join(__dirname, '../extension/_locales/en/messages.json'), 'utf8'));
+const fakeI18n = {
+  getMessage(key, substitutions) {
+    const entry = enMessages[key];
+    if (!entry) return '';
+    const subs = substitutions == null ? [] : (Array.isArray(substitutions) ? substitutions : [substitutions]);
+    return entry.message.replace(/\$([A-Za-z0-9_]+)\$/g, (match, name) => {
+      const slot = entry.placeholders?.[name.toLowerCase()];
+      if (!slot) return match;
+      const index = Number(String(slot.content).replace('$', '')) - 1;
+      return index >= 0 && subs[index] != null ? String(subs[index]) : match;
+    });
+  },
+  getUILanguage: () => 'en',
+};
+
 test('Douyin fetches media in the source page and rejects HTML before queuing', async () => {
   const posted = [];
   const revoked = [];
@@ -221,6 +237,7 @@ function backgroundHarness(stored, history = {}, existingDownloads = []) {
   const context = vm.createContext({
     URL, console: quiet, setTimeout,
     chrome: {
+      i18n: fakeI18n,
       storage: { local: {
         async get(key, callback) { if (callback) callback({}); return { downloadQueueState: stored, downloadHistory: JSON.parse(JSON.stringify(persistedHistory)) }; },
         async set(value) {
@@ -485,7 +502,7 @@ test('Douyin captures loaded videos and galleries and isolates SPA profiles', as
   await flush();
   assert.deepEqual(Array.from((await extract()).media, m => m.id), ['dy_2_0', 'dy_2_1']);
   popup.item = (await extract()).media[0];
-  assert.equal(vm.runInContext('generateFilename(item)', popup), 'douyin/bob_未命名/dy_2_0.jpg');
+  assert.equal(vm.runInContext('generateFilename(item)', popup), 'douyin/bob/dy_2_0.jpg');
   location.pathname = '/';
   assert.equal((await extract()).media.length, 0);
   location.pathname = '/user/alice';
@@ -494,6 +511,72 @@ test('Douyin captures loaded videos and galleries and isolates SPA profiles', as
   await window.fetch('/aweme/v1/web/aweme/post/');
   await flush();
   assert.equal((await extract()).media.length, 1);
+});
+
+
+function instagramHarness({ title = '', h1 = null } = {}) {
+  const callbacks = {};
+  const location = { hostname: 'www.instagram.com', origin: 'https://www.instagram.com', protocol: 'https:', pathname: '/alice' };
+  const nameEl = h1 == null ? null : { textContent: h1 };
+  const header = {
+    querySelector(selector) {
+      return selector === 'h1' ? nameEl : null;
+    },
+  };
+  const document = {
+    title,
+    documentElement: { innerHTML: '' }, body: {},
+    querySelector(selector) {
+      return selector === 'header' ? header : null;
+    },
+    querySelectorAll: () => [],
+  };
+  const context = vm.createContext({
+    URL, console: quiet, setTimeout, clearTimeout,
+    performance: { getEntriesByType: () => [] }, document,
+    window: { location, addEventListener() {}, postMessage() {} },
+    MutationObserver: class { observe() {} disconnect() {} },
+    chrome: { runtime: { sendMessage() {}, onMessage: { addListener(fn) { callbacks.message = fn; } } } },
+  });
+  vm.runInContext(source('content_script.js'), context);
+  return () => new Promise((resolve) => callbacks.message({ action: 'extractMedia' }, {}, resolve));
+}
+
+test('Instagram reads the display name from the page title or profile header', async () => {
+  let extract = instagramHarness({ title: '小明 (@alice) • Instagram photos and videos' });
+  assert.equal((await extract()).profileInfo.display_name, '小明');
+
+  // Current Instagram markup has no h1 for the full name; the title still works.
+  extract = instagramHarness({ title: 'Instagram' });
+  assert.equal((await extract()).profileInfo.display_name, undefined);
+
+  // Older markup kept the display name in the profile header's h1.
+  extract = instagramHarness({ title: 'Instagram', h1: '小明' });
+  assert.equal((await extract()).profileInfo.display_name, '小明');
+
+  // An account whose name is just its handle must not become "handle_handle".
+  extract = instagramHarness({ title: 'alice (@alice) • Instagram photos and videos' });
+  assert.equal((await extract()).profileInfo.display_name, undefined);
+
+  // A title left over from another profile is ignored.
+  extract = instagramHarness({ title: 'Bob (@bob) • Instagram photos and videos' });
+  assert.equal((await extract()).profileInfo.display_name, undefined);
+
+  // A display name that itself contains "(@…)" keeps the real handle's name.
+  extract = instagramHarness({ title: 'Foo (@bar) (@alice) • Instagram photos and videos' });
+  assert.equal((await extract()).profileInfo.display_name, 'Foo (@bar)');
+});
+
+test('filenames do not repeat a media extension already present in the id', () => {
+  const popup = vm.createContext({ console: quiet, document: { querySelector: () => null, addEventListener() {} } });
+  vm.runInContext(source('popup.js'), popup);
+  popup.item = { id: 'ig_500100731_1823267538531568_5514530159845209663_n.jpg', platform: 'instagram', username: 'ssunbiki', display_name: '昵称', media_type: 'Image' };
+  assert.equal(vm.runInContext('generateFilename(item)', popup),
+    'instagram/ssunbiki_昵称/ig_500100731_1823267538531568_5514530159845209663_n.jpg');
+  popup.item = { id: 'ig_clip.mp4', platform: 'instagram', username: 'ssunbiki', display_name: '昵称', media_type: 'Video' };
+  assert.equal(vm.runInContext('generateFilename(item)', popup), 'instagram/ssunbiki_昵称/ig_clip.mp4');
+  popup.item = { id: '.jpg', platform: 'instagram', username: 'ssunbiki' };
+  assert.equal(vm.runInContext('generateFilename(item)', popup), 'instagram/ssunbiki/media.jpg');
 });
 
 
@@ -519,6 +602,48 @@ test('all platforms use platform/ID_nickname folders after WASM processing', asy
     await bg.run("handleDownload('https://cdn.example.com/v.mp4', filename)");
     assert.equal(bg.started.at(-1).filename, `ProfileDownloader/${filename}`);
     popup.items[0].display_name = null;
-    assert.equal(vm.runInContext('generateFilename(items[0])', popup), `${platform}/creator_未命名/post1.mp4`);
+    assert.equal(vm.runInContext('generateFilename(items[0])', popup), `${platform}/creator/post1.mp4`);
+  }
+});
+
+
+test('popup strings resolve through chrome.i18n placeholders', () => {
+  const popup = vm.createContext({
+    console: quiet, chrome: { i18n: fakeI18n },
+    document: { querySelector: () => null, addEventListener() {} },
+  });
+  vm.runInContext(source('popup.js'), popup);
+  assert.equal(vm.runInContext("t('statPosts', ['3'])", popup), '3 posts');
+  assert.equal(vm.runInContext("t('downloadSelectedCount', ['2'])", popup), 'Download Selected (2)');
+});
+
+test('locale catalogs cover the same keys and declare their placeholders', () => {
+  const catalogs = {};
+  for (const locale of ['en', 'zh_CN']) {
+    catalogs[locale] = JSON.parse(fs.readFileSync(
+      path.join(__dirname, `../extension/_locales/${locale}/messages.json`), 'utf8'));
+  }
+  assert.deepEqual(Object.keys(catalogs.en).sort(), Object.keys(catalogs.zh_CN).sort());
+
+  const manifest = JSON.parse(source('manifest.json'));
+  assert.equal(manifest.default_locale, 'en');
+  const refs = JSON.stringify(manifest).match(/__MSG_[A-Za-z0-9_]+__/g) || [];
+  assert.ok(refs.length >= 3, 'manifest should localize name, description and action title');
+  for (const ref of refs) {
+    const key = ref.slice(6, -2);
+    assert.ok(catalogs.en[key], `manifest references missing message ${key}`);
+  }
+
+  for (const [locale, catalog] of Object.entries(catalogs)) {
+    for (const [key, entry] of Object.entries(catalog)) {
+      const used = [...entry.message.matchAll(/\$([A-Za-z0-9_]+)\$/g)].map((m) => m[1].toLowerCase());
+      const declared = Object.keys(entry.placeholders || {}).map((name) => name.toLowerCase());
+      for (const name of used) {
+        assert.ok(declared.includes(name), `${locale}.${key} uses undeclared placeholder $${name}$`);
+      }
+      for (const name of declared) {
+        assert.ok(used.includes(name), `${locale}.${key} declares unused placeholder ${name}`);
+      }
+    }
   }
 });

@@ -29,6 +29,16 @@
   let douyinProfile = null;
   let onlyFansResolutionRunning = false;
 
+  function t(key) {
+    try {
+      if (chrome.i18n?.getMessage) {
+        const message = chrome.i18n.getMessage(key);
+        if (message) return message;
+      }
+    } catch (_) {}
+    return key;
+  }
+
   function detectPlatform() {
     const host = window.location.hostname.toLowerCase();
     const isHost = (domain) => host === domain || host.endsWith('.' + domain);
@@ -294,7 +304,7 @@
         }
         tiktokDownloadRequests.delete(event.data.requestId);
         if (!event.data.success || !event.data.blobUrl) {
-          pending.reject(new Error(event.data.error || 'Media download failed'));
+          pending.reject(new Error(event.data.error || t('mediaDownloadFailed')));
           return;
         }
         preparedBlobUrls.add(event.data.blobUrl);
@@ -306,7 +316,7 @@
             filename: pending.item.filename,
           },
         }).then((response) => {
-          if (!response?.success) throw new Error(response?.error || 'Could not start media download');
+          if (!response?.success) throw new Error(response?.error || t('couldNotStartMediaDownload'));
           pending.resolve(response);
         }).catch((err) => {
           preparedBlobUrls.delete(event.data.blobUrl);
@@ -839,7 +849,7 @@
       const requestId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const timer = setTimeout(() => {
         tiktokDownloadRequests.delete(requestId);
-        reject(new Error('Media fetch timed out; keep the source page open and retry'));
+        reject(new Error(t('mediaFetchTimeout')));
       }, 60000);
       tiktokDownloadRequests.set(requestId, {
         item,
@@ -866,7 +876,7 @@
         if (response?.skipped) skipped++;
         else downloaded++;
       } catch (err) {
-        errors.push({ id: item.id, error: err.message || 'Download failed' });
+        errors.push({ id: item.id, error: err.message || t('downloadFailedPlain') });
       }
     }
     return {
@@ -875,7 +885,7 @@
       skipped,
       failed: errors.length,
       errors: errors.slice(0, 10),
-      error: downloaded + skipped === 0 ? (errors[0]?.error || 'No media could be downloaded') : undefined,
+      error: downloaded + skipped === 0 ? (errors[0]?.error || t('noMediaDownloaded')) : undefined,
     };
   }
 
@@ -961,9 +971,34 @@
 
   function getInstagramProfile(username) {
     const info = { username };
-    const nameEl = document.querySelector('section h1, header h1');
-    if (nameEl) info.display_name = nameEl.textContent.trim();
-    const avatarEl = document.querySelector('img[src*="profile_pic"], header img');
+    const handle = String(username || '').toLowerCase();
+    const header = document.querySelector('header');
+
+    // Older Instagram markup put the display name in the profile header's
+    // <h1>. The current layout only uses <h2> for the username and plain text
+    // for the display name, so an h1-only selector returns nothing.
+    const nameEl = header?.querySelector('h1');
+    const domName = nameEl?.textContent.trim();
+    if (domName) info.display_name = domName;
+
+    // The page title is the stable source across layouts:
+    // "Display Name (@handle) • Instagram photos and videos". Only trust it
+    // when the handle matches, so a stale SPA title can't name another profile.
+    if (!info.display_name) {
+      const titles = [document.title, document.querySelector('meta[property="og:title"]')?.content];
+      for (const title of titles) {
+        const match = String(title || '').match(/^(.+)\s*\(@([^)]+)\)/);
+        if (!match || match[2].toLowerCase() !== handle) continue;
+        const name = match[1].trim().replace(/^@/, '');
+        if (name && name.toLowerCase() !== handle) {
+          info.display_name = name;
+          break;
+        }
+      }
+    }
+
+    const avatarEl = header?.querySelector('img[src*="profile_pic"]')
+      || document.querySelector('img[src*="profile_pic"], header img');
     if (avatarEl) info.avatar_url = avatarEl.src;
     return info;
   }
@@ -1058,7 +1093,7 @@
             if (urls[0]) return resolve(urls[0]);
           }
         }
-        if (Date.now() - startedAt >= timeoutMs) return reject(new Error('OnlyFans video source timed out'));
+        if (Date.now() - startedAt >= timeoutMs) return reject(new Error(t('onlyfansSourceTimeout')));
         setTimeout(inspect, 150);
       };
       inspect();
@@ -1085,7 +1120,7 @@
       return onlyFansMediaToken(resolveImageUrl(image)) === onlyFansMediaToken(item.thumbnail_url);
     });
     if (!target || target.querySelector('.b-post__unknown')) {
-      throw new Error('OnlyFans video tile is no longer available or is locked');
+      throw new Error(t('onlyfansTileUnavailable'));
     }
     target.click();
     try {
@@ -1097,7 +1132,7 @@
   }
 
   async function downloadOnlyFansBatch(items) {
-    if (onlyFansResolutionRunning) throw new Error('OnlyFans video resolution is already running');
+    if (onlyFansResolutionRunning) throw new Error(t('onlyfansResolutionRunning'));
     onlyFansResolutionRunning = true;
     const errors = [];
     let downloaded = 0;
@@ -1110,11 +1145,11 @@
             action: 'downloadPreparedMedia',
             item: { id: item.id, url, filename: item.filename },
           });
-          if (!response?.success) throw new Error(response?.error || 'Could not start OnlyFans download');
+          if (!response?.success) throw new Error(response?.error || t('couldNotStartOnlyfansDownload'));
           if (response.skipped) skipped++;
           else downloaded++;
         } catch (err) {
-          errors.push({ id: item.id, error: err.message || 'Download failed' });
+          errors.push({ id: item.id, error: err.message || t('downloadFailedPlain') });
         }
       }
     } finally {
@@ -1126,7 +1161,7 @@
       skipped,
       failed: errors.length,
       errors: errors.slice(0, 10),
-      error: downloaded + skipped === 0 ? (errors[0]?.error || 'No OnlyFans videos could be resolved') : undefined,
+      error: downloaded + skipped === 0 ? (errors[0]?.error || t('noOnlyfansVideos')) : undefined,
     };
   }
 
@@ -1378,7 +1413,7 @@
         });
         } catch (err) {
           console.error('[ProfileDownloader] Extraction error:', err);
-          sendResponse({ error: err.message || 'Extraction failed' });
+          sendResponse({ error: err.message || t('extractionFailed') });
         }
       })();
     } else if (request.action === 'downloadTikTokBatch' || (platform === 'douyin' && request.action === 'downloadDouyinBatch')) {

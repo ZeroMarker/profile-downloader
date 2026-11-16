@@ -10,8 +10,8 @@
   <div id="app">
     <!-- Header -->
     <header class="header">
-      <h1>📥 Profile Media Downloader</h1>
-      <p class="subtitle">Download media from X / TikTok / Douyin / Instagram / Weibo / OnlyFans</p>
+      <h1><span aria-hidden="true">📥</span> <span data-i18n="appTitle"></span></h1>
+      <p class="subtitle" data-i18n="subtitle"></p>
     </header>
 
     <!-- Main Content -->
@@ -20,14 +20,14 @@
       <div id="status-section" class="section">
         <div id="platform-indicator" class="platform-badge">
           <span id="platform-icon">🔍</span>
-          <span id="platform-text">Detecting platform...</span>
+          <span id="platform-text" data-i18n="detectingPlatform"></span>
         </div>
       </div>
 
       <!-- Profile Info -->
       <div id="profile-section" class="section hidden">
         <div class="profile-card">
-          <img id="profile-avatar" class="avatar" src="" alt="avatar" />
+          <img id="profile-avatar" class="avatar" src="" alt="avatar" data-i18n-alt="avatarAlt" />
           <div class="profile-info">
             <h3 id="profile-username">@username</h3>
             <p id="profile-display-name" class="display-name"></p>
@@ -39,37 +39,37 @@
       <!-- Media List -->
       <div id="media-section" class="section hidden">
         <div class="media-header">
-          <h2>Media</h2>
+          <h2 data-i18n="mediaHeading"></h2>
           <span id="media-count" class="count-badge">0 items</span>
         </div>
         <div class="media-actions">
-          <button id="select-all-btn" class="btn btn-sm">Select All</button>
+          <button id="select-all-btn" class="btn btn-sm" data-i18n="selectAll"></button>
           <button id="download-selected-btn" class="btn btn-primary btn-sm" disabled>
             Download Selected (0)
           </button>
-          <button id="download-all-btn" class="btn btn-secondary btn-sm">Download All</button>
+          <button id="download-all-btn" class="btn btn-secondary btn-sm" data-i18n="downloadAll"></button>
         </div>
         <div id="media-list" class="media-grid">
           <!-- Media items rendered by JS -->
-          <div class="loading">Loading media...</div>
+          <div class="loading" data-i18n="loadingMedia"></div>
         </div>
       </div>
 
       <!-- Download Progress -->
       <div id="progress-section" class="section hidden">
-        <h3>Downloads</h3>
+        <h3 data-i18n="downloadsHeading"></h3>
         <div id="progress-bar" class="progress-bar">
           <div id="progress-fill" class="progress-fill" style="width: 0%"></div>
         </div>
-        <p id="progress-text" class="progress-text">0 / 0 completed</p>
+        <p id="progress-text" class="progress-text" data-i18n="progressInitial"></p>
       </div>
 
       <!-- Error Display -->
       <div id="error-section" class="section hidden">
         <div class="error-card">
           <span class="error-icon">⚠️</span>
-          <p id="error-text">An error occurred</p>
-          <button id="retry-btn" class="btn btn-sm">Retry</button>
+          <p id="error-text" data-i18n="errorOccurred"></p>
+          <button id="retry-btn" class="btn btn-sm" data-i18n="retry"></button>
         </div>
       </div>
     </main>
