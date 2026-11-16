@@ -46,7 +46,7 @@ Background Service Worker
 2. Popup 根据活动标签页 URL 识别平台，并向 Content Script 发送 `extractMedia`。
 3. Content Script 合并 DOM、页面状态和拦截器收集到的候选媒体。
 4. Popup 将媒体交给 `process_media_batch`；若 WASM 未加载，则使用 JavaScript 回退逻辑。
-5. 用户选择媒体后，Popup 生成文件名并提交一个下载批次。
+5. 用户选择媒体后，Popup 生成文件名并提交一个下载批次；也可按媒体类型只下载视频或只下载图片。
 6. Background 先持久化整个批次，再按 `maxConcurrent` 启动下载。
 7. `chrome.downloads.onChanged` 更新成功或失败计数，并继续消费队列。
 

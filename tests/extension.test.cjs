@@ -680,6 +680,55 @@ test('all platforms use platform/ID_nickname folders after WASM processing', asy
 });
 
 
+test('video and image downloads queue only the matching media types', async () => {
+  const elements = new Map();
+  const batches = [];
+  const context = vm.createContext({
+    console: quiet,
+    document: {
+      addEventListener() {},
+      querySelector(selector) {
+        if (!elements.has(selector)) elements.set(selector, {
+          style: {}, disabled: false, textContent: '',
+          classList: { add() {}, remove() {}, toggle() {} }, addEventListener() {},
+        });
+        return elements.get(selector);
+      },
+      querySelectorAll: () => [],
+    },
+    chrome: {
+      i18n: fakeI18n,
+      runtime: {
+        async sendMessage(message) {
+          if (message.action === 'getDownloadedFilenames') return { filenames: [] };
+          if (message.action === 'downloadBatch') {
+            batches.push(message.items);
+            return { queued: message.items.length, skipped: 0, failed: 0 };
+          }
+          if (message.action === 'getDownloadQueueStatus') return { pending: 0, active: 0 };
+          return {};
+        },
+      },
+    },
+  });
+  vm.runInContext(source('popup.js'), context);
+  context.items = [
+    { id: 'v1', media_type: 'Video', url: 'https://cdn.example.com/1.mp4', platform: 'twitter', username: 'alice' },
+    { id: 'i1', media_type: 'Image', url: 'https://cdn.example.com/1.jpg', platform: 'twitter', username: 'alice' },
+    { id: 'v2', media_type: 'video', url: 'https://cdn.example.com/2.mp4', platform: 'twitter', username: 'alice' },
+  ];
+  vm.runInContext("state.platform = 'twitter'; state.mediaItems = items; updateDownloadButton();", context);
+  assert.equal(elements.get('#download-videos-btn').textContent, '🎬 Videos (2)');
+  assert.equal(elements.get('#download-images-btn').textContent, '🖼️ Images (1)');
+
+  await vm.runInContext("startDownload('videos')", context);
+  assert.deepEqual(Array.from(batches[0], (item) => item.id), ['v1', 'v2']);
+  await vm.runInContext("startDownload('images')", context);
+  assert.deepEqual(Array.from(batches[1], (item) => item.id), ['i1']);
+  await vm.runInContext("startDownload('selected')", context);
+  assert.equal(batches.length, 2, 'an empty selection must not queue a batch');
+});
+
 test('popup strings resolve through chrome.i18n placeholders', () => {
   const popup = vm.createContext({
     console: quiet, chrome: { i18n: fakeI18n },

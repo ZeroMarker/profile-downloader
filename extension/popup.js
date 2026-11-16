@@ -309,6 +309,7 @@ async function restoreDownloadState() {
     $('#download-all-btn').disabled = true;
     $('#download-selected-btn').disabled = true;
     $('#select-all-btn').disabled = true;
+    updateDownloadButton();
     sections.progress.classList.remove('hidden');
     $('#progress-fill').style.width = '70%';
     $('#progress-text').textContent = downloadQueueText(status);
@@ -436,30 +437,64 @@ function toggleSelection(id) {
   updateDownloadButton();
 }
 
+function isVideoItem(item) {
+  return String(item?.media_type || '').toLowerCase() === 'video';
+}
+
+function isImageItem(item) {
+  return String(item?.media_type || '').toLowerCase() === 'image';
+}
+
 /**
- * Update the download button state.
+ * Update the download button states and the per-type counts.
  */
 function updateDownloadButton() {
   const btn = $('#download-selected-btn');
   const count = state.selectedIds.size;
-  btn.disabled = count === 0;
-  btn.textContent = t('downloadSelectedCount', [String(count)]);
+  if (btn) {
+    btn.disabled = count === 0 || state.isDownloading;
+    btn.textContent = t('downloadSelectedCount', [String(count)]);
+  }
+
+  updateTypeButton('#download-videos-btn', 'downloadVideos',
+    state.mediaItems.filter(isVideoItem).length);
+  updateTypeButton('#download-images-btn', 'downloadImages',
+    state.mediaItems.filter(isImageItem).length);
+}
+
+function updateTypeButton(selector, labelKey, count) {
+  const btn = $(selector);
+  if (!btn) return;
+  btn.disabled = count === 0 || state.isDownloading;
+  btn.textContent = t(labelKey, [String(count)]);
 }
 
 /**
- * Start downloading selected or all media.
+ * Start downloading selected, all, or a single media type.
+ * `scope` is one of: 'selected', 'all', 'videos', 'images'.
  */
-async function startDownload(selectedOnly) {
+async function startDownload(scope = 'all') {
   if (state.isDownloading) return;
 
   await refreshDownloadedMarks();
-  const requested = selectedOnly
+  const requested = scope === 'selected'
     ? state.mediaItems.filter((m) => state.selectedIds.has(m.id))
+    : scope === 'videos'
+    ? state.mediaItems.filter(isVideoItem)
+    : scope === 'images'
+    ? state.mediaItems.filter(isImageItem)
     : state.mediaItems;
   const items = requested.filter((m) => !state.downloadedIds.has(m.id));
   const alreadyDone = requested.length - items.length;
 
-  if (requested.length === 0) return;
+  if (requested.length === 0) {
+    sections.progress.classList.remove('hidden');
+    $('#progress-fill').style.width = '0%';
+    $('#progress-text').textContent = scope === 'videos'
+      ? t('noVideosFound')
+      : scope === 'images' ? t('noImagesFound') : t('noMediaItems');
+    return;
+  }
   if (items.length === 0) {
     sections.progress.classList.remove('hidden');
     $('#progress-fill').style.width = '100%';
@@ -471,6 +506,7 @@ async function startDownload(selectedOnly) {
   $('#download-all-btn').disabled = true;
   $('#download-selected-btn').disabled = true;
   $('#select-all-btn').disabled = true;
+  updateDownloadButton();
 
   sections.progress.classList.remove('hidden');
   const fill = $('#progress-fill');
@@ -596,8 +632,10 @@ $('#select-all-btn')?.addEventListener('click', () => {
   updateDownloadButton();
 });
 
-$('#download-selected-btn')?.addEventListener('click', () => startDownload(true));
-$('#download-all-btn')?.addEventListener('click', () => startDownload(false));
+$('#download-selected-btn')?.addEventListener('click', () => startDownload('selected'));
+$('#download-all-btn')?.addEventListener('click', () => startDownload('all'));
+$('#download-videos-btn')?.addEventListener('click', () => startDownload('videos'));
+$('#download-images-btn')?.addEventListener('click', () => startDownload('images'));
 
 $('#retry-btn')?.addEventListener('click', () => {
   sections.error.classList.add('hidden');

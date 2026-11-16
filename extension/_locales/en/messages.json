@@ -34,6 +34,28 @@
   "downloadAll": {
     "message": "Download All"
   },
+  "downloadVideos": {
+    "message": "🎬 Videos ($COUNT$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "downloadImages": {
+    "message": "🖼️ Images ($COUNT$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "noVideosFound": {
+    "message": "No videos found on this page."
+  },
+  "noImagesFound": {
+    "message": "No images found on this page."
+  },
   "loadingMedia": {
     "message": "Loading media..."
   },

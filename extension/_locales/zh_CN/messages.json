@@ -34,6 +34,28 @@
   "downloadAll": {
     "message": "全部下载"
   },
+  "downloadVideos": {
+    "message": "🎬 视频（$COUNT$）",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "downloadImages": {
+    "message": "🖼️ 图片（$COUNT$）",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "noVideosFound": {
+    "message": "此页面未找到视频。"
+  },
+  "noImagesFound": {
+    "message": "此页面未找到图片。"
+  },
   "loadingMedia": {
     "message": "正在加载媒体..."
   },

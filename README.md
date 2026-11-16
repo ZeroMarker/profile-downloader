@@ -7,9 +7,9 @@
 
 ## 版本与商店状态
 
-2026-11-13 最后核对：扩展版本为 **1.0.2**，Chrome 应用商店状态为**待审核**，已开启**审核通过后自动发布**，尚未确认上架。
+2026-11-16 最后核对：商店版本 **1.0.2** 已通过审核并在 Chrome 应用商店发布上架，扩展 ID 为 `jpdiaigjgblmajgkjnpliddppepgacai`。商店链接：<https://chromewebstore.google.com/detail/jpdiaigjgblmajgkjnpliddppepgacai>。
 
-本次修正了商店审核指出的描述关键词堆砌：摘要和详细说明改为介绍实际功能与使用步骤。扩展 ID 为 `jpdiaigjgblmajgkjnpliddppepgacai`。版本记录、验证范围和上传包校验值见[商店提交记录](docs/chrome-web-store/submission-history.md)。
+此后源码新增“按视频 / 图片类型下载”等改动，版本已更新为 **1.0.3**，尚未提交商店审核；webtop 中的本地安装已同步到 1.0.3。版本记录、验证范围和上传包校验值见[商店提交记录](docs/chrome-web-store/submission-history.md)。
 
 ## 支持的平台
 
@@ -35,6 +35,7 @@ TikTok 下载期间请保持源标签页打开。关闭或刷新源页面会将�
 
 - 自动识别当前平台并扫描媒体
 - 网格预览、单选、全选和批量下载
+- 可只下载视频或只下载图片（所有支持的平台通用）
 - 按媒体 ID 去重，并按时间倒序排列
 - 持久化下载队列；默认最多同时下载 3 个文件
 - WASM 加载失败时自动使用 JavaScript 回退逻辑
@@ -50,7 +51,7 @@ TikTok 下载期间请保持源标签页打开。关闭或刷新源页面会将�
 3. 开启右上角的「开发者模式」。
 4. 点击「加载已解压的扩展程序」，选择解压后的目录。
 
-> Chrome 应用商店 1.0.2 已送审，审核通过后自动发布；在确认上架前可继续使用 GitHub Release 或源码安装。
+> Chrome 应用商店版本 **1.0.2 已发布**。源码与 webtop 安装当前为 **1.0.3**（包含按视频 / 图片类型下载），尚未提交商店；也可继续使用 GitHub Release 或源码安装。
 
 ### 从源码构建
 
@@ -68,7 +69,7 @@ wasm-pack build --release --target web --out-dir extension/wasm --locked
 1. 登录目标平台，并进入用户个人主页。
 2. 向下滚动，让需要下载的内容加载到页面中。
 3. 点击浏览器工具栏中的扩展图标。
-4. 在预览网格中选择媒体，或直接下载全部媒体。
+4. 在预览网格中选择媒体，或按类型（视频 / 图片）或全部下载。
 5. 文件会保存到 Chrome 默认下载目录下的 `ProfileDownloader/平台/ID_昵称/` 文件夹。ID 使用账号用户名或用户 ID；昵称缺失时只使用 ID，中文昵称会保留。
 
 OnlyFans 支持不会解锁内容、绕过付费墙，或获取当前账号无权访问的媒体。使用本扩展时，请遵守平台条款、创作者权利和所在地法律。
@@ -129,7 +130,7 @@ Release 工作流会执行质量检查、构建 WASM、打包扩展，并上传 
 
 也可以在 GitHub 的 **Actions → Release → Run workflow** 中输入已推送的标签（例如 `v1.0.0`）手动发布或重试。工作流会检出该标签，核对扩展版本，并排除 Chrome 生成的 `_metadata`。重试已有 Release 时会更新同名 ZIP 和校验文件。
 
-GitHub Release 与 Chrome 应用商店是独立流程。1.0.2 本次使用本地构建 ZIP 上传商店，未创建 `v1.0.2` 标签或 GitHub Release；不要把商店送审状态当作已发布的 GitHub 版本。
+GitHub Release 与 Chrome 应用商店是独立流程。商店 1.0.2 使用本地构建 ZIP 上传并已发布，但未创建 `v1.0.2` 标签或 GitHub Release；不要用商店发布状态替代 GitHub Release 记录。
 
 ## 贡献
 
