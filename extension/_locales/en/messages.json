@@ -12,7 +12,7 @@
     "message": "Profile Media Downloader"
   },
   "subtitle": {
-    "message": "Download media from X / TikTok / Douyin / Instagram / Weibo / OnlyFans"
+    "message": "Download media from X / TikTok / Douyin / Kuaishou / Instagram / Weibo / OnlyFans"
   },
   "detectingPlatform": {
     "message": "Detecting platform..."
@@ -62,7 +62,7 @@
     "message": "No active tab detected."
   },
   "unsupportedPlatform": {
-    "message": "Not on a supported platform. Open X, TikTok, Douyin, Instagram, Weibo, or OnlyFans."
+    "message": "Not on a supported platform. Open X, TikTok, Douyin, Kuaishou, Instagram, Weibo, or OnlyFans."
   },
   "navigateToProfile": {
     "message": "Please navigate to a user profile page first."
@@ -93,6 +93,9 @@
   "platformDouyin": {
     "message": "Douyin"
   },
+  "platformKuaishou": {
+    "message": "Kuaishou"
+  },
   "platformInstagram": {
     "message": "Instagram"
   },
@@ -112,6 +115,14 @@
   },
   "douyinHandle": {
     "message": "Douyin ID: $ID$",
+    "placeholders": {
+      "id": {
+        "content": "$1"
+      }
+    }
+  },
+  "kuaishouId": {
+    "message": "Kuaishou ID: $ID$",
     "placeholders": {
       "id": {
         "content": "$1"

@@ -1,0 +1,29 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        {
+          "header": "Referer",
+          "operation": "set",
+          "value": "https://www.kuaishou.com/"
+        }
+      ]
+    },
+    "condition": {
+      "requestDomains": [
+        "kwaicdn.com",
+        "yximgs.com",
+        "kwimgs.com"
+      ],
+      "resourceTypes": [
+        "image",
+        "media",
+        "xmlhttprequest",
+        "other"
+      ]
+    }
+  }
+]

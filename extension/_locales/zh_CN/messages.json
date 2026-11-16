@@ -12,7 +12,7 @@
     "message": "Profile Media Downloader"
   },
   "subtitle": {
-    "message": "从 X / TikTok / 抖音 / Instagram / 微博 / OnlyFans 下载媒体"
+    "message": "从 X / TikTok / 抖音 / 快手 / Instagram / 微博 / OnlyFans 下载媒体"
   },
   "detectingPlatform": {
     "message": "正在识别平台..."
@@ -62,7 +62,7 @@
     "message": "未检测到活动标签页。"
   },
   "unsupportedPlatform": {
-    "message": "当前不是受支持的平台。请打开 X、TikTok、抖音、Instagram、微博或 OnlyFans。"
+    "message": "当前不是受支持的平台。请打开 X、TikTok、抖音、快手、Instagram、微博或 OnlyFans。"
   },
   "navigateToProfile": {
     "message": "请先进入用户个人主页。"
@@ -93,6 +93,9 @@
   "platformDouyin": {
     "message": "抖音"
   },
+  "platformKuaishou": {
+    "message": "快手"
+  },
   "platformInstagram": {
     "message": "Instagram"
   },
@@ -112,6 +115,14 @@
   },
   "douyinHandle": {
     "message": "抖音号：$ID$",
+    "placeholders": {
+      "id": {
+        "content": "$1"
+      }
+    }
+  },
+  "kuaishouId": {
+    "message": "快手号：$ID$",
     "placeholders": {
       "id": {
         "content": "$1"

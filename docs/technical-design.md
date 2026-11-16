@@ -106,6 +106,7 @@ Chrome 遇到同名文件时使用 `uniquify` 保留两个文件。
 | --- | --- | --- |
 | X / Twitter | 页面运行时资源、`video.twimg.com` 请求 | Tweet DOM 中的图片和视频元素 |
 | TikTok | 页面状态和 TikTok CDN 请求 | 当前页面的视频元素与帖子链接 |
+| 快手 | 页面 INIT_STATE、`/rest/v/profile/*` 响应 | 页面网格封面 |
 | Instagram | 页面状态、Instagram/Facebook CDN 请求 | 图片、视频与轮播 DOM |
 | 微博 | 页面 JSON 与媒体请求 | 微博 DOM、Sina/Weibo CDN URL |
 | OnlyFans | 当前会话返回的可访问媒体数据 | 页面中已渲染的图片和视频 |

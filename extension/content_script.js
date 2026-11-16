@@ -27,6 +27,7 @@
   const tiktokResolutionTasks = new Map();
   const tiktokDownloadRequests = new Map();
   let douyinProfile = null;
+  let kuaishouProfile = null;
   let onlyFansResolutionRunning = false;
 
   function t(key) {
@@ -47,6 +48,7 @@
       const html = document.documentElement.innerHTML.toLowerCase();
       if (html.includes('twitter.com') || html.includes('x.com')) return 'twitter';
       if (html.includes('douyin.com')) return 'douyin';
+      if (html.includes('kuaishou.com')) return 'kuaishou';
       if (html.includes('tiktok.com')) return 'tiktok';
       if (html.includes('instagram.com')) return 'instagram';
       if (html.includes('onlyfans.com')) return 'onlyfans';
@@ -62,6 +64,7 @@
     }
     if (isHost('twitter.com') || isHost('x.com')) return 'twitter';
     if (isHost('douyin.com')) return 'douyin';
+    if (isHost('kuaishou.com')) return 'kuaishou';
     if (isHost('tiktok.com')) return 'tiktok';
     if (isHost('instagram.com')) return 'instagram';
     if (isHost('onlyfans.com')) return 'onlyfans';
@@ -87,6 +90,7 @@
     const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
     const segments = path.split('/').filter(Boolean);
     if (platform === 'douyin' && segments[0] === 'user') return segments[1] || '';
+    if (platform === 'kuaishou' && segments[0] === 'profile') return segments[1] || '';
     if (platform === 'weibo' && ['u', 'n'].includes(segments[0]?.toLowerCase())) {
       return (segments[1] || '').replace(/^@/, '');
     }
@@ -100,6 +104,7 @@
     const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
     const firstSegment = path.split('/')[0] || '';
     if (platform === 'douyin') return /^user\/[^/]+\/?$/.test(path);
+    if (platform === 'kuaishou') return /^profile\/[^/]+\/?$/.test(path);
     const excluded = ['home', 'explore', 'notifications', 'messages', 'bookmarks',
                       'settings', 'search', 'i', 'login', 'signup', 'register',
                       'about', 'privacy', 'tos', 'discover', 'foryou', 'following',
@@ -238,6 +243,8 @@
         window.postMessage({ source: 'profile-downloader', type: 'onlyfans-media-request' }, '*');
       } else if (platform === 'douyin') {
         window.postMessage({ source: 'profile-downloader', type: 'douyin-media-request' }, '*');
+      } else if (platform === 'kuaishou') {
+        window.postMessage({ source: 'profile-downloader', type: 'kuaishou-media-request' }, '*');
       } else if (platform === 'weibo') {
         window.postMessage({ source: 'profile-downloader', type: 'weibo-media-request' }, '*');
       }
@@ -246,7 +253,7 @@
   function setupPageMessageListener() {
     window.addEventListener('message', function(event) {
       if (event.data?.source === 'profile-downloader'
-          && ['twitter-videos', 'tiktok-videos', 'instagram-media', 'onlyfans-media', 'weibo-media', 'douyin-media'].includes(event.data.type)
+          && ['twitter-videos', 'tiktok-videos', 'instagram-media', 'onlyfans-media', 'weibo-media', 'douyin-media', 'kuaishou-media'].includes(event.data.type)
           && !syncProfileContext()) return;
       if (event.source === window && platform === 'douyin'
           && event.data?.source === 'profile-downloader' && event.data.type === 'douyin-media') {
@@ -266,6 +273,30 @@
               post_url: `https://www.douyin.com/${media.type === 'image' ? 'note' : 'video'}/${item.postId}`,
               platform: 'douyin', username, caption: item.caption || null, timestamp: item.timestamp,
               content_type: media.type === 'video' ? 'video/mp4' : null });
+          }
+        }
+      }
+      if (event.source === window && platform === 'kuaishou'
+          && event.data?.source === 'profile-downloader' && event.data.type === 'kuaishou-media') {
+        const profileId = extractUsername();
+        if (event.data.profile?.profile_id === profileId) kuaishouProfile = event.data.profile;
+        const username = kuaishouProfile?.username || profileId;
+        for (const item of event.data.items || []) {
+          if (item.ownerId !== profileId) continue;
+          accumulatedMedia = accumulatedMedia.filter((existing) => existing.id !== `ks_${item.postId}`);
+          for (const media of item.media || []) {
+            let url;
+            try { url = new URL(media.url); } catch (_) { continue; }
+            if (!['https:', 'http:'].includes(url.protocol)) continue;
+            if (!/(^|\.)(kwaicdn|yximgs|kwimgs|kspkg)\.com$/i.test(url.hostname)) continue;
+            const id = `ks_${item.postId}_${media.id}`;
+            if (accumulatedSeen.has(id)) continue;
+            accumulatedSeen.add(id);
+            accumulatedMedia.push({ id, media_type: media.type === 'video' ? 'Video' : 'Image',
+              url: url.href, thumbnail_url: media.thumbnail || null,
+              post_url: `https://www.kuaishou.com/short-video/${item.postId}`,
+              platform: 'kuaishou', username, caption: item.caption || null, timestamp: item.timestamp,
+              content_type: media.type === 'video' ? 'video/mp4' : 'image/jpeg' });
           }
         }
       }
@@ -293,12 +324,12 @@
       }
       if (event.source === window
           && event.data?.source === 'profile-downloader'
-          && event.data?.type === (platform === 'douyin' ? 'douyin-download-result' : 'tiktok-download-result')) {
+          && event.data?.type === `${pagePlatform()}-download-result`) {
         const pending = tiktokDownloadRequests.get(event.data.requestId);
         if (!pending) {
           // The page fetch can finish after the request timed out.
           if (event.data.blobUrl) {
-            window.postMessage({ source: 'profile-downloader', type: platform === 'douyin' ? 'douyin-revoke-blob' : 'tiktok-revoke-blob', blobUrl: event.data.blobUrl }, '*');
+            window.postMessage({ source: 'profile-downloader', type: `${pagePlatform()}-revoke-blob`, blobUrl: event.data.blobUrl }, '*');
           }
           return;
         }
@@ -320,7 +351,7 @@
           pending.resolve(response);
         }).catch((err) => {
           preparedBlobUrls.delete(event.data.blobUrl);
-          window.postMessage({ source: 'profile-downloader', type: platform === 'douyin' ? 'douyin-revoke-blob' : 'tiktok-revoke-blob', blobUrl: event.data.blobUrl }, '*');
+          window.postMessage({ source: 'profile-downloader', type: `${pagePlatform()}-revoke-blob`, blobUrl: event.data.blobUrl }, '*');
           pending.reject(err);
         });
       }
@@ -844,6 +875,10 @@
     return info;
   }
 
+  function pagePlatform() {
+    return platform === 'douyin' ? 'douyin' : platform === 'kuaishou' ? 'kuaishou' : 'tiktok';
+  }
+
   function downloadTikTokInPage(item) {
     return new Promise((resolve, reject) => {
       const requestId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -858,7 +893,7 @@
       });
       window.postMessage({
         source: 'profile-downloader',
-        type: platform === 'douyin' ? 'douyin-download-request' : 'tiktok-download-request',
+        type: `${pagePlatform()}-download-request`,
         requestId,
         url: item.url,
         filename: item.filename,
@@ -1287,6 +1322,7 @@
       profileGeneration++;
       accumulatedMedia = [];
       douyinProfile = null;
+      kuaishouProfile = null;
       accumulatedSeen.clear();
       twitterVideoCandidates.clear();
       tiktokVideoCandidates.clear();
@@ -1315,6 +1351,11 @@
       case 'tiktok':   return getTikTokProfile(username);
       case 'instagram': return getInstagramProfile(username);
       case 'onlyfans': return getOnlyFansProfile(username);
+      case 'kuaishou': {
+        const urlId = extractUsername();
+        return { ...kuaishouProfile, username: kuaishouProfile?.username || urlId,
+          profile_id: urlId, display_name: kuaishouProfile?.display_name || null };
+      }
       case 'douyin': {
         const name = document.querySelector('[data-e2e="user-info"] h1, [data-e2e="user-info"] h2');
         return { ...douyinProfile, username: douyinProfile?.username || username,
@@ -1381,7 +1422,7 @@
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'releasePreparedBlob') {
       preparedBlobUrls.delete(request.url);
-      window.postMessage({ source: 'profile-downloader', type: platform === 'douyin' ? 'douyin-revoke-blob' : 'tiktok-revoke-blob', blobUrl: request.url }, '*');
+      window.postMessage({ source: 'profile-downloader', type: `${pagePlatform()}-revoke-blob`, blobUrl: request.url }, '*');
       sendResponse({ success: true });
     } else if (request.action === 'validatePreparedBlob') {
       sendResponse({ valid: preparedBlobUrls.has(request.url) });
@@ -1406,6 +1447,8 @@
         sendResponse({
           media: platform === 'douyin'
             ? accumulatedMedia.map(item => ({ ...item, username: douyinProfile?.username || extractUsername(), display_name: getProfileInfo().display_name }))
+            : platform === 'kuaishou'
+            ? accumulatedMedia.map(item => ({ ...item, display_name: kuaishouProfile?.display_name || null }))
             : accumulatedMedia,
           username: extractUsername(),
           profileInfo: getProfileInfo(),
@@ -1416,7 +1459,7 @@
           sendResponse({ error: err.message || t('extractionFailed') });
         }
       })();
-    } else if (request.action === 'downloadTikTokBatch' || (platform === 'douyin' && request.action === 'downloadDouyinBatch')) {
+    } else if (request.action === 'downloadTikTokBatch' || (platform === 'douyin' && request.action === 'downloadDouyinBatch') || (platform === 'kuaishou' && request.action === 'downloadKuaishouBatch')) {
       downloadTikTokBatch(Array.isArray(request.items) ? request.items : [])
         .then(sendResponse)
         .catch((err) => sendResponse({ success: false, error: err.message }));

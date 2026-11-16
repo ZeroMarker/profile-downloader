@@ -180,6 +180,7 @@ async function init() {
       const path = decodeURIComponent(url.pathname).toLowerCase();
       if (path.includes('twitter') || path.includes('x.com')) platform = 'twitter';
       else if (path.includes('douyin') || path.includes('抖音')) platform = 'douyin';
+      else if (path.includes('kuaishou') || path.includes('快手')) platform = 'kuaishou';
       else if (path.includes('tiktok')) platform = 'tiktok';
       else if (path.includes('instagram')) platform = 'instagram';
       else if (path.includes('onlyfans')) platform = 'onlyfans';
@@ -189,6 +190,8 @@ async function init() {
       platform = 'twitter';
     } else if (isHost('douyin.com')) {
       platform = 'douyin';
+    } else if (isHost('kuaishou.com')) {
+      platform = 'kuaishou';
     } else if (isHost('tiktok.com')) {
       platform = 'tiktok';
     } else if (isHost('instagram.com')) {
@@ -212,6 +215,7 @@ async function init() {
       twitter: ['🐦', 'platformTwitter'],
       tiktok: ['🎵', 'platformTiktok'],
       douyin: ['🎵', 'platformDouyin'],
+      kuaishou: ['🎬', 'platformKuaishou'],
       instagram: ['📸', 'platformInstagram'],
       onlyfans: ['🔐', 'platformOnlyfans'],
       weibo: ['🧣', 'platformWeibo'],
@@ -356,6 +360,8 @@ function renderProfile(info) {
   const username = info.username || state.username || '';
   $('#profile-username').textContent = state.platform === 'douyin'
     ? (username === info.profile_id ? t('douyinUserId', [username]) : t('douyinHandle', [username]))
+    : state.platform === 'kuaishou' && info.profile_id && info.profile_id !== username
+    ? t('kuaishouId', [username])
     : `@${username}`;
   $('#profile-display-name').textContent = info.display_name || '';
   const stats = [];
@@ -478,9 +484,9 @@ async function startDownload(selectedOnly) {
       url: item.url,
       filename: generateFilename(item),
     }));
-    const response = ['tiktok', 'douyin'].includes(state.platform)
+    const response = ['tiktok', 'douyin', 'kuaishou'].includes(state.platform)
       ? await chrome.tabs.sendMessage(state.tabId, {
-          action: state.platform === 'douyin' ? 'downloadDouyinBatch' : 'downloadTikTokBatch',
+          action: state.platform === 'douyin' ? 'downloadDouyinBatch' : state.platform === 'kuaishou' ? 'downloadKuaishouBatch' : 'downloadTikTokBatch',
           items: downloadItems,
         })
       : state.platform === 'onlyfans'

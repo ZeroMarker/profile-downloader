@@ -35,7 +35,12 @@
     "https://douyin.com/*",
     "https://*.douyin.com/*",
     "https://*.douyinvod.com/*",
-    "https://*.byteimg.com/*"
+    "https://*.byteimg.com/*",
+    "https://kuaishou.com/*",
+    "https://*.kuaishou.com/*",
+    "https://*.kwaicdn.com/*",
+    "https://*.yximgs.com/*",
+    "https://*.kwimgs.com/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -61,6 +66,11 @@
         "id": "douyin_media_headers",
         "enabled": true,
         "path": "rules/douyin_media_headers.json"
+      },
+      {
+        "id": "kuaishou_media_headers",
+        "enabled": true,
+        "path": "rules/kuaishou_media_headers.json"
       }
     ]
   },
@@ -121,6 +131,17 @@
     },
     {
       "matches": [
+        "https://kuaishou.com/*",
+        "https://www.kuaishou.com/*"
+      ],
+      "js": [
+        "kuaishou_media_interceptor.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
         "https://instagram.com/*",
         "https://www.instagram.com/*"
       ],
@@ -143,7 +164,9 @@
         "https://www.weibo.com/*",
         "file:///*",
         "https://douyin.com/*",
-        "https://*.douyin.com/*"
+        "https://*.douyin.com/*",
+        "https://kuaishou.com/*",
+        "https://*.kuaishou.com/*"
       ],
       "js": [
         "content_script.js"

@@ -580,6 +580,79 @@ test('filenames do not repeat a media extension already present in the id', () =
 });
 
 
+
+test('Kuaishou reads profile metadata and media from INIT_STATE', async () => {
+  const callbacks = {};
+  const listeners = [];
+  const location = { hostname: 'www.kuaishou.com', origin: 'https://www.kuaishou.com', protocol: 'https:', pathname: '/profile/3xde323hhpr9dju' };
+  const state = {
+    prefetch: {
+      'profile': { result: 1, userProfile: {
+        profile: { user_id: '3xde323hhpr9dju', user_name: '-小瑾·', headurl: 'https://p22.a.yximgs.com/uhead/a.jpg', user_text: 'bio' },
+        userDefineId: 'jin970608', ownerCount: { fan: 1477000, follow: 89, photo_public: 25172 },
+      } },
+      'feed': { result: 1, feeds: [
+        { type: 1, author: { id: '3xde323hhpr9dju', name: '-小瑾·' }, photo: {
+          id: '3xabc', caption: 'hello', timestamp: 1700000000000, duration: 10000,
+          coverUrl: 'https://p1.a.yximgs.com/cover.jpg',
+          manifest: { adaptationSet: [{ representation: [
+            { url: 'https://v1.kwaicdn.com/low.mp4', maxBitrate: 1000 },
+            { url: 'https://v1.kwaicdn.com/high.mp4', maxBitrate: 2000 },
+          ] }] },
+        } },
+        { type: 1, author: { id: '3xde323hhpr9dju', name: '-小瑾·' }, photo: {
+          id: '3ximg', caption: 'atlas', timestamp: 1700000001000,
+          coverUrl: 'https://p1.a.yximgs.com/cover2.jpg',
+          ext_params: JSON.stringify({ atlas: { cdn: [
+            { url: 'https://p1.a.yximgs.com/1.jpg' },
+            { url: 'https://p1.a.yximgs.com/2.jpg' },
+          ] } }),
+        } },
+        { type: 1, author: { id: '3xother', name: 'other' }, photo: { id: '3xforeign', duration: 1000, photoUrls: [{ url: 'https://v1.kwaicdn.com/x.mp4' }] } },
+      ] },
+    },
+  };
+  const window = {
+    location,
+    INIT_STATE: JSON.stringify(state),
+    addEventListener(type, fn) { if (type === 'message') listeners.push(fn); },
+    postMessage(data) { queueMicrotask(() => listeners.forEach((fn) => fn({ source: window, data }))); },
+  };
+  const document = {
+    documentElement: { innerHTML: '' }, body: {}, title: '',
+    querySelector: () => null, querySelectorAll: () => [],
+  };
+  const context = vm.createContext({
+    URL, console: quiet, setTimeout, clearTimeout,
+    performance: { getEntriesByType: () => [] }, document, window,
+    XMLHttpRequest: class { send() {} },
+    MutationObserver: class { observe() {} disconnect() {} },
+    chrome: { runtime: { sendMessage() {}, onMessage: { addListener(fn) { callbacks.message = fn; } } } },
+  });
+  vm.runInContext(source('kuaishou_media_interceptor.js'), context);
+  vm.runInContext(source('content_script.js'), context);
+  await flush();
+  const extract = () => new Promise((resolve) => callbacks.message({ action: 'extractMedia' }, {}, resolve));
+  const result = await extract();
+  assert.equal(result.profileInfo.username, 'jin970608');
+  assert.equal(result.profileInfo.profile_id, '3xde323hhpr9dju');
+  assert.equal(result.profileInfo.display_name, '-小瑾·');
+  assert.equal(result.profileInfo.follower_count, 1477000);
+  assert.equal(result.profileInfo.post_count, 25172);
+  assert.deepEqual(Array.from(result.media, (item) => item.id),
+    ['ks_3xabc_video', 'ks_3ximg_img_0', 'ks_3ximg_img_1']);
+  assert.equal(result.media[0].url, 'https://v1.kwaicdn.com/high.mp4');
+  assert.equal(result.media[0].platform, 'kuaishou');
+  assert.equal(result.media[0].username, 'jin970608');
+  assert.equal(result.media[0].post_url, 'https://www.kuaishou.com/short-video/3xabc');
+  assert.equal(result.media[1].media_type, 'Image');
+  const popup = vm.createContext({ console: quiet, document: { querySelector: () => null, addEventListener() {} } });
+  vm.runInContext(source('popup.js'), popup);
+  popup.item = result.media[0];
+  assert.equal(vm.runInContext('generateFilename(item)', popup), 'kuaishou/jin970608_-小瑾·/ks_3xabc_video.mp4');
+});
+
+
 test('download paths preserve Douyin folders and Chinese nicknames safely', async () => {
   const bg = backgroundHarness();
   await bg.run("handleDownload('https://cdn.example.com/v.mp4', 'douyin/alice_小明/video.mp4')");
@@ -594,7 +667,7 @@ test('all platforms use platform/ID_nickname folders after WASM processing', asy
   vm.runInContext(source('popup.js'), popup);
   vm.runInContext(`wasm = { process_media_batch: input => JSON.stringify(JSON.parse(input).map(({ display_name, ...item }) => item)) }; state.wasmReady = true;`, popup);
   const bg = backgroundHarness();
-  for (const platform of ['twitter', 'tiktok', 'instagram', 'weibo', 'onlyfans', 'douyin']) {
+  for (const platform of ['twitter', 'tiktok', 'instagram', 'weibo', 'onlyfans', 'douyin', 'kuaishou']) {
     popup.items = [{ id: 'post1', platform, username: 'creator', display_name: '昵称/测试', media_type: 'Video' }];
     const filename = vm.runInContext('generateFilename(processMedia(items)[0])', popup);
     assert.equal(filename, `${platform}/creator_昵称_测试/post1.mp4`);
