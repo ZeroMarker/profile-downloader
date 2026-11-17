@@ -60,7 +60,7 @@
 - ZIP 根目录直接包含 `manifest.json`，不含 Chrome 生成的 `_metadata/`。
 - SHA-256：`3fc0eb1431863cb6203278f0dd2b65b2ab46aa2da9b48c2235e80e507256de61`。
 - 版本与上一次同步提交已推送 `main`：`9d9c349`。
-- 本次未创建 `v1.0.3` Git 标签或 GitHub Release。若重新构建，ZIP 的文件时间等可能变化，应重新生成校验值，不沿用上面的摘要。
+- 已创建 `v1.0.3` Git 标签和 GitHub Release，发布包为 `profile-downloader-v1.0.3.zip` 及 `.sha256`（由 Release 工作流重建，文件时间与本地包不同，校验值以 Release 附件为准）。本地商店上传包仍使用上面的 SHA-256。
 
 ## 后续操作
 

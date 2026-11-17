@@ -130,7 +130,7 @@ Release 工作流会执行质量检查、构建 WASM、打包扩展，并上传 
 
 也可以在 GitHub 的 **Actions → Release → Run workflow** 中输入已推送的标签（例如 `v1.0.0`）手动发布或重试。工作流会检出该标签，核对扩展版本，并排除 Chrome 生成的 `_metadata`。重试已有 Release 时会更新同名 ZIP 和校验文件。
 
-GitHub Release 与 Chrome 应用商店是独立流程。商店 1.0.2 和 1.0.3 均使用本地构建 ZIP 上传，未创建对应的 Git 标签或 GitHub Release；不要用商店发布状态替代 GitHub Release 记录。
+GitHub Release 与 Chrome 应用商店是独立流程。1.0.2 使用本地构建 ZIP 上传但未创建标签；1.0.3 已创建 `v1.0.3` 标签和 GitHub Release，同时另行上传商店并提交审核。不要用其中一个状态替代另一个记录。
 
 ## 贡献
 
