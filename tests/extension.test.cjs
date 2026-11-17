@@ -662,10 +662,10 @@ test('profile folders keep handle underscores and normalize stylised names', () 
   assert.equal(vm.runInContext('generateFilename(item)', popup),
     'instagram/__kkr_____KOKORO/ig_1_n.jpg');
 
-  // Emoji-only display names must not leave underscores behind.
+  // Emoji are part of the display name and must be preserved, not stripped.
   popup.item = { id: 'ig_2_n.jpg', platform: 'instagram', username: '__kkr____', display_name: '✨🇰🇷✨', media_type: 'Image' };
   assert.equal(vm.runInContext('generateFilename(item)', popup),
-    'instagram/__kkr____/ig_2_n.jpg');
+    'instagram/__kkr_____✨🇰🇷✨/ig_2_n.jpg');
 });
 
 
@@ -754,6 +754,8 @@ test('download paths preserve Douyin folders and Chinese nicknames safely', asyn
   assert.equal(bg.started[2].filename, 'ProfileDownloader/instagram/__kkr_____KOKORO/ig_1.jpg');
   await bg.run("handleDownload('https://cdn.example.com/v.mp4', 'instagram/user_🄺🄾🄺🄾🅁🄾/ig_2.jpg')");
   assert.equal(bg.started[3].filename, 'ProfileDownloader/instagram/user_KOKORO/ig_2.jpg');
+  await bg.run("handleDownload('https://cdn.example.com/v.mp4', 'instagram/user_💓/ig_3.jpg')");
+  assert.equal(bg.started[4].filename, 'ProfileDownloader/instagram/user_💓/ig_3.jpg');
 });
 
 

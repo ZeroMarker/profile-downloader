@@ -578,14 +578,10 @@ async function startDownload(scope = 'all') {
  *
  * NFKC turns "stylised" names into plain letters, so an Instagram display
  * name like "🄺🄾🄺🄾🅁🄾" becomes "KOKORO" instead of the boxed glyphs
- * file managers show as mojibake. Zero-width characters and remaining
- * pictographs are dropped for the same reason.
+ * file managers show as mojibake. Emoji and other characters are preserved.
  */
 function cleanPathText(value) {
-  return String(value || '')
-    .normalize('NFKC')
-    .replace(/[\u200B-\u200D\u2060\uFE0E\uFE0F\uFEFF]/g, '')
-    .replace(/\p{So}/gu, '');
+  return String(value || '').normalize('NFKC');
 }
 
 /**

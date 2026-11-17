@@ -375,14 +375,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  *
  * Underscores are deliberately preserved: Instagram handles such as
  * "__kkr____" legitimately start and end with them, and older code stripped
- * them here, silently renaming the profile folder. NFKC + pictograph removal
- * keeps stylised display names out of the path (see popup.js).
+ * them here, silently renaming the profile folder. NFKC turns stylised
+ * display names into plain letters (see popup.js) without dropping emoji.
  */
 function sanitizeDownloadSegment(value, fallback = '_') {
   const safe = String(value || '')
     .normalize('NFKC')
-    .replace(/[\u200B-\u200D\u2060\uFE0E\uFE0F\uFEFF]/g, '')
-    .replace(/\p{So}/gu, '')
     .replace(/[<>:"\\|?*\x00-\x1f]/g, '_')
     .replace(/\s+/g, '_')
     .replace(/[. ]+$/g, '');
