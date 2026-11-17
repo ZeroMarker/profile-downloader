@@ -28,6 +28,7 @@
   const tiktokDownloadRequests = new Map();
   let douyinProfile = null;
   let kuaishouProfile = null;
+  let instagramProfile = null;
   let onlyFansResolutionRunning = false;
 
   function t(key) {
@@ -253,8 +254,15 @@
   function setupPageMessageListener() {
     window.addEventListener('message', function(event) {
       if (event.data?.source === 'profile-downloader'
-          && ['twitter-videos', 'tiktok-videos', 'instagram-media', 'onlyfans-media', 'weibo-media', 'douyin-media', 'kuaishou-media'].includes(event.data.type)
+          && ['twitter-videos', 'tiktok-videos', 'instagram-media', 'instagram-profile', 'onlyfans-media', 'weibo-media', 'douyin-media', 'kuaishou-media'].includes(event.data.type)
           && !syncProfileContext()) return;
+      if (event.source === window && platform === 'instagram'
+          && event.data?.source === 'profile-downloader' && event.data.type === 'instagram-profile') {
+        const handle = extractUsername().toLowerCase();
+        const match = (event.data.profiles || []).find((profile) =>
+          String(profile?.username || '').toLowerCase() === handle);
+        if (match) instagramProfile = match;
+      }
       if (event.source === window && platform === 'douyin'
           && event.data?.source === 'profile-downloader' && event.data.type === 'douyin-media') {
         const username = extractUsername();
@@ -1009,12 +1017,21 @@
     const handle = String(username || '').toLowerCase();
     const header = document.querySelector('header');
 
+    // Instagram's rendered header has no stable display-name element, and the
+    // SPA often leaves document.title as plain "Instagram". The page's own
+    // JSON payloads always carry full_name, so prefer the captured profile.
+    if (instagramProfile && String(instagramProfile.username || '').toLowerCase() === handle) {
+      const name = String(instagramProfile.full_name || '').trim();
+      if (name && name.toLowerCase() !== handle) info.display_name = name;
+      if (instagramProfile.avatar) info.avatar_url = instagramProfile.avatar;
+    }
+
     // Older Instagram markup put the display name in the profile header's
     // <h1>. The current layout only uses <h2> for the username and plain text
     // for the display name, so an h1-only selector returns nothing.
     const nameEl = header?.querySelector('h1');
     const domName = nameEl?.textContent.trim();
-    if (domName) info.display_name = domName;
+    if (domName && !info.display_name) info.display_name = domName;
 
     // The page title is the stable source across layouts:
     // "Display Name (@handle) • Instagram photos and videos". Only trust it
@@ -1034,7 +1051,7 @@
 
     const avatarEl = header?.querySelector('img[src*="profile_pic"]')
       || document.querySelector('img[src*="profile_pic"], header img');
-    if (avatarEl) info.avatar_url = avatarEl.src;
+    if (avatarEl && !info.avatar_url) info.avatar_url = avatarEl.src;
     return info;
   }
 
@@ -1323,6 +1340,7 @@
       accumulatedMedia = [];
       douyinProfile = null;
       kuaishouProfile = null;
+      instagramProfile = null;
       accumulatedSeen.clear();
       twitterVideoCandidates.clear();
       tiktokVideoCandidates.clear();

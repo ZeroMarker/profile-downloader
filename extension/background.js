@@ -371,26 +371,43 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 /**
- * Download a media file using the Chrome downloads API.
- * Includes basic retry logic for transient failures.
- * The `filename` parameter may include subdirectories: "user_folder/file.ext"
+ * Sanitize one segment of a download path.
+ *
+ * Underscores are deliberately preserved: Instagram handles such as
+ * "__kkr____" legitimately start and end with them, and older code stripped
+ * them here, silently renaming the profile folder. NFKC + pictograph removal
+ * keeps stylised display names out of the path (see popup.js).
  */
+function sanitizeDownloadSegment(value, fallback = '_') {
+  const safe = String(value || '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\u2060\uFE0E\uFE0F\uFEFF]/g, '')
+    .replace(/\p{So}/gu, '')
+    .replace(/[<>:"\\|?*\x00-\x1f]/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/[. ]+$/g, '');
+  return safe || fallback;
+}
+
 function resolveDownloadPath(filename) {
   // Preserve nested folders while sanitizing each path segment.
   const parts = String(filename || 'media').split('/');
   const filePart = parts.pop() || 'media';
   const folderParts = parts;
 
-  // Sanitize folder name
-  const safeFolder = folderParts.map(part => part.replace(/[<>:"\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_').replace(/^_+|_+$/g, '').replace(/[. ]+$/g, '') || '_').join('/');
-  // Sanitize file name
-  const safeFile = filePart.replace(/[<>:"\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_').replace(/^_+|_+$/g, '') || 'media';
+  const safeFolder = folderParts.map((part) => sanitizeDownloadSegment(part)).join('/');
+  const safeFile = sanitizeDownloadSegment(filePart, 'media');
 
   return safeFolder
     ? `${settings.downloadPath}/${safeFolder}/${safeFile}`
     : `${settings.downloadPath}/${safeFile}`;
 }
 
+/**
+ * Download a media file using the Chrome downloads API.
+ * Includes basic retry logic for transient failures.
+ * The `filename` parameter may include subdirectories: "user_folder/file.ext"
+ */
 async function handleDownload(url, filename, retries = 1) {
   validateDownloadUrl(url);
   const fullPath = resolveDownloadPath(filename);

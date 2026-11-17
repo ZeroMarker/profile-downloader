@@ -2,6 +2,39 @@
 (function () {
   'use strict';
   const published = new Map();
+  // full_name is only exposed in Instagram's JSON payloads; the rendered DOM
+  // has no reliable element for it. Keep every user node we see and let the
+  // content script pick the one matching the current profile handle.
+  const profiles = new Map();
+
+  function rememberProfiles(payload) {
+    const visited = new Set();
+    function walk(value) {
+      if (!value || typeof value !== 'object' || visited.has(value)) return;
+      visited.add(value);
+      if (typeof value.username === 'string' && typeof value.full_name === 'string') {
+        const fullName = value.full_name.trim();
+        if (fullName) {
+          profiles.set(value.username.toLowerCase(), {
+            username: value.username,
+            full_name: fullName,
+            avatar: value.profile_pic_url_hd || value.profile_pic_url || null,
+          });
+        }
+      }
+      Object.values(value).forEach(walk);
+    }
+    walk(payload);
+  }
+
+  function publishProfiles() {
+    if (profiles.size === 0) return;
+    window.postMessage({
+      source: 'profile-downloader',
+      type: 'instagram-profile',
+      profiles: Array.from(profiles.values()),
+    }, '*');
+  }
 
   const imageUrl = (item) => item?.image_versions2?.candidates?.[0]?.url || item?.display_url || item?.display_src || null;
   const videoUrl = (item) => item?.video_versions?.[0]?.url || item?.video_url || null;
@@ -60,6 +93,8 @@
   function publishBody(body) {
     try {
       const payload = typeof body === 'string' ? JSON.parse(body) : body;
+      rememberProfiles(payload);
+      publishProfiles();
       const items = extract(payload);
       if (items.length > 0) window.postMessage({ source: 'profile-downloader', type: 'instagram-media', items }, '*');
     } catch (_) {}
@@ -71,6 +106,7 @@
         || event.data?.type !== 'instagram-media-request') return;
     const items = Array.from(published.values());
     if (items.length > 0) window.postMessage({ source: 'profile-downloader', type: 'instagram-media', items }, '*');
+    publishProfiles();
   });
 
   const originalFetch = window.fetch;

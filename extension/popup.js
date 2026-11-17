@@ -574,6 +574,34 @@ async function startDownload(scope = 'all') {
 }
 
 /**
+ * Normalize text scraped from the page before using it in a file path.
+ *
+ * NFKC turns "stylised" names into plain letters, so an Instagram display
+ * name like "🄺🄾🄺🄾🅁🄾" becomes "KOKORO" instead of the boxed glyphs
+ * file managers show as mojibake. Zero-width characters and remaining
+ * pictographs are dropped for the same reason.
+ */
+function cleanPathText(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\u2060\uFE0E\uFE0F\uFEFF]/g, '')
+    .replace(/\p{So}/gu, '');
+}
+
+/**
+ * Sanitize one path segment. Leading/trailing underscores are kept by
+ * default because they are valid (and common) in profile handles such as
+ * "__kkr____"; only the nickname has its edges trimmed.
+ */
+function sanitizePathSegment(value, fallback, trimUnderscores = false) {
+  let safe = cleanPathText(value)
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_')
+    .replace(/[. ]+$/g, '');
+  if (trimUnderscores) safe = safe.replace(/^_+|_+$/g, '');
+  return safe || fallback;
+}
+
+/**
  * Generate a filename: {platform}/{username}_{nickname}/{id}.{ext}.
  * When the profile has no display name the nickname segment is omitted:
  * {platform}/{username}/{id}.{ext}.
@@ -581,16 +609,13 @@ async function startDownload(scope = 'all') {
  */
 function generateFilename(item) {
   const ext = getExtension(item);
-  const sanitize = (value, fallback) => String(value || fallback)
-    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_')
-    .replace(/[. ]+$/g, '') || fallback;
-  const safeUsername = sanitize(item.username, 'unknown');
+  const safeUsername = sanitizePathSegment(item.username, 'unknown');
   // Ids scraped from media URLs already carry an extension (Instagram's
   // "..._n.jpg"), which would otherwise produce "..._n.jpg.jpg".
-  const safeId = sanitize(item.id, 'media')
+  const safeId = sanitizePathSegment(item.id, 'media')
     .replace(/(?:\.(?:jpe?g|png|gif|webp|webm|mp4|mov|m4v|mp3|m4a))+$/i, '') || 'media';
-  const nickname = sanitize(item.display_name, '');
-  const platform = sanitize(item.platform, 'unknown');
+  const nickname = sanitizePathSegment(item.display_name, '', true);
+  const platform = sanitizePathSegment(item.platform, 'unknown');
   const folder = nickname ? `${safeUsername}_${nickname}` : safeUsername;
   return `${platform}/${folder}/${safeId}.${ext}`;
 }

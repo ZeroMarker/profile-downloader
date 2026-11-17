@@ -514,8 +514,9 @@ test('Douyin captures loaded videos and galleries and isolates SPA profiles', as
 });
 
 
-function instagramHarness({ title = '', h1 = null } = {}) {
+function instagramHarness({ title = '', h1 = null, profile = null } = {}) {
   const callbacks = {};
+  const messageListeners = [];
   const location = { hostname: 'www.instagram.com', origin: 'https://www.instagram.com', protocol: 'https:', pathname: '/alice' };
   const nameEl = h1 == null ? null : { textContent: h1 };
   const header = {
@@ -531,14 +532,22 @@ function instagramHarness({ title = '', h1 = null } = {}) {
     },
     querySelectorAll: () => [],
   };
+  const window = {
+    location,
+    addEventListener(type, fn) { if (type === 'message') messageListeners.push(fn); },
+    postMessage() {},
+  };
   const context = vm.createContext({
     URL, console: quiet, setTimeout, clearTimeout,
-    performance: { getEntriesByType: () => [] }, document,
-    window: { location, addEventListener() {}, postMessage() {} },
+    performance: { getEntriesByType: () => [] }, document, window,
     MutationObserver: class { observe() {} disconnect() {} },
     chrome: { runtime: { sendMessage() {}, onMessage: { addListener(fn) { callbacks.message = fn; } } } },
   });
   vm.runInContext(source('content_script.js'), context);
+  if (profile) {
+    const event = { source: window, data: { source: 'profile-downloader', type: 'instagram-profile', profiles: [profile] } };
+    messageListeners.forEach((fn) => fn(event));
+  }
   return () => new Promise((resolve) => callbacks.message({ action: 'extractMedia' }, {}, resolve));
 }
 
@@ -565,6 +574,70 @@ test('Instagram reads the display name from the page title or profile header', a
   // A display name that itself contains "(@…)" keeps the real handle's name.
   extract = instagramHarness({ title: 'Foo (@bar) (@alice) • Instagram photos and videos' });
   assert.equal((await extract()).profileInfo.display_name, 'Foo (@bar)');
+
+  // The SPA can leave the title as plain "Instagram"; the full_name captured
+  // from the page's JSON payload is used instead.
+  extract = instagramHarness({
+    title: 'Instagram',
+    profile: { username: 'alice', full_name: '拍羽想@NORÉVE', avatar: 'https://cdn.example.com/a.jpg' },
+  });
+  assert.equal((await extract()).profileInfo.display_name, '拍羽想@NORÉVE');
+  assert.equal((await extract()).profileInfo.avatar_url, 'https://cdn.example.com/a.jpg');
+
+  // Captured profiles from other handles must not leak into this profile.
+  extract = instagramHarness({
+    title: 'Instagram',
+    profile: { username: 'bob', full_name: 'Bob Name' },
+  });
+  assert.equal((await extract()).profileInfo.display_name, undefined);
+
+  // A captured full_name that is just the handle is not a real display name.
+  extract = instagramHarness({
+    title: 'Instagram',
+    profile: { username: 'alice', full_name: 'alice' },
+  });
+  assert.equal((await extract()).profileInfo.display_name, undefined);
+});
+
+test('Instagram interceptor publishes full_name from JSON responses', async () => {
+  const posted = [];
+  const listeners = [];
+  const payload = {
+    data: { user: { username: 'alice', full_name: '拍羽想@NORÉVE', profile_pic_url_hd: 'https://cdn.example.com/a.jpg' } },
+  };
+  const response = {
+    headers: { get: () => 'application/json' },
+    clone: () => ({ text: async () => JSON.stringify(payload) }),
+  };
+  const window = {
+    addEventListener(type, fn) { if (type === 'message') listeners.push(fn); },
+    postMessage(message) { posted.push(message); },
+    async fetch() { return response; },
+  };
+  const context = vm.createContext({
+    window, console: quiet,
+    XMLHttpRequest: class { send() {} },
+  });
+  vm.runInContext(source('instagram_media_interceptor.js'), context);
+  await window.fetch('/api/v1/users/web_profile_info/?username=alice');
+  await flush();
+
+  const profileMessage = posted.find((message) => message.type === 'instagram-profile');
+  assert.ok(profileMessage, 'expected an instagram-profile message');
+  assert.deepEqual(JSON.parse(JSON.stringify(profileMessage.profiles)), [{
+    username: 'alice',
+    full_name: '拍羽想@NORÉVE',
+    avatar: 'https://cdn.example.com/a.jpg',
+  }]);
+
+  // Re-publish the captured profile when the content script asks for data
+  // after the API response has already arrived.
+  posted.length = 0;
+  listeners.forEach((fn) => fn({
+    source: window,
+    data: { source: 'profile-downloader', type: 'instagram-media-request' },
+  }));
+  assert.equal(posted.filter((message) => message.type === 'instagram-profile').length, 1);
 });
 
 test('filenames do not repeat a media extension already present in the id', () => {
@@ -577,6 +650,22 @@ test('filenames do not repeat a media extension already present in the id', () =
   assert.equal(vm.runInContext('generateFilename(item)', popup), 'instagram/ssunbiki_昵称/ig_clip.mp4');
   popup.item = { id: '.jpg', platform: 'instagram', username: 'ssunbiki' };
   assert.equal(vm.runInContext('generateFilename(item)', popup), 'instagram/ssunbiki/media.jpg');
+});
+
+test('profile folders keep handle underscores and normalize stylised names', () => {
+  const popup = vm.createContext({ console: quiet, document: { querySelector: () => null, addEventListener() {} } });
+  vm.runInContext(source('popup.js'), popup);
+
+  // Enclosed letters in an Instagram display name are plain text after NFKC,
+  // not the boxed glyphs that show up as mojibake in file managers.
+  popup.item = { id: 'ig_1_n.jpg', platform: 'instagram', username: '__kkr____', display_name: '🄺🄾🄺🄾🅁🄾', media_type: 'Image' };
+  assert.equal(vm.runInContext('generateFilename(item)', popup),
+    'instagram/__kkr_____KOKORO/ig_1_n.jpg');
+
+  // Emoji-only display names must not leave underscores behind.
+  popup.item = { id: 'ig_2_n.jpg', platform: 'instagram', username: '__kkr____', display_name: '✨🇰🇷✨', media_type: 'Image' };
+  assert.equal(vm.runInContext('generateFilename(item)', popup),
+    'instagram/__kkr____/ig_2_n.jpg');
 });
 
 
@@ -659,6 +748,12 @@ test('download paths preserve Douyin folders and Chinese nicknames safely', asyn
   assert.equal(bg.started[0].filename, 'ProfileDownloader/douyin/alice_小明/video.mp4');
   await bg.run("handleDownload('https://cdn.example.com/v.mp4', 'douyin/../video.mp4')");
   assert.equal(bg.started[1].filename, 'ProfileDownloader/douyin/_/video.mp4');
+  // Instagram handles may start/end with underscores; they are part of the
+  // profile slug and must not be stripped from the folder name.
+  await bg.run("handleDownload('https://cdn.example.com/v.mp4', 'instagram/__kkr_____KOKORO/ig_1.jpg')");
+  assert.equal(bg.started[2].filename, 'ProfileDownloader/instagram/__kkr_____KOKORO/ig_1.jpg');
+  await bg.run("handleDownload('https://cdn.example.com/v.mp4', 'instagram/user_🄺🄾🄺🄾🅁🄾/ig_2.jpg')");
+  assert.equal(bg.started[3].filename, 'ProfileDownloader/instagram/user_KOKORO/ig_2.jpg');
 });
 
 
