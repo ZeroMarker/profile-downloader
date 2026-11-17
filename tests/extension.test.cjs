@@ -652,20 +652,24 @@ test('filenames do not repeat a media extension already present in the id', () =
   assert.equal(vm.runInContext('generateFilename(item)', popup), 'instagram/ssunbiki/media.jpg');
 });
 
-test('profile folders keep handle underscores and normalize stylised names', () => {
+test('profile folders keep handle underscores and display names exactly', () => {
   const popup = vm.createContext({ console: quiet, document: { querySelector: () => null, addEventListener() {} } });
   vm.runInContext(source('popup.js'), popup);
 
-  // Enclosed letters in an Instagram display name are plain text after NFKC,
-  // not the boxed glyphs that show up as mojibake in file managers.
+  // Display names are not Unicode-normalized; kept exactly as returned.
   popup.item = { id: 'ig_1_n.jpg', platform: 'instagram', username: '__kkr____', display_name: '🄺🄾🄺🄾🅁🄾', media_type: 'Image' };
   assert.equal(vm.runInContext('generateFilename(item)', popup),
-    'instagram/__kkr_____KOKORO/ig_1_n.jpg');
+    'instagram/__kkr_____🄺🄾🄺🄾🅁🄾/ig_1_n.jpg');
 
   // Emoji are part of the display name and must be preserved, not stripped.
   popup.item = { id: 'ig_2_n.jpg', platform: 'instagram', username: '__kkr____', display_name: '✨🇰🇷✨', media_type: 'Image' };
   assert.equal(vm.runInContext('generateFilename(item)', popup),
     'instagram/__kkr_____✨🇰🇷✨/ig_2_n.jpg');
+
+  // Decomposed Hangul stays decomposed rather than being NFC-composed.
+  popup.item = { id: 'ig_3_n.jpg', platform: 'instagram', username: 'ssunbiki', display_name: '썬비키', media_type: 'Image' };
+  assert.equal(vm.runInContext('generateFilename(item)', popup),
+    'instagram/ssunbiki_썬비키/ig_3_n.jpg');
 });
 
 
@@ -750,10 +754,10 @@ test('download paths preserve Douyin folders and Chinese nicknames safely', asyn
   assert.equal(bg.started[1].filename, 'ProfileDownloader/douyin/_/video.mp4');
   // Instagram handles may start/end with underscores; they are part of the
   // profile slug and must not be stripped from the folder name.
-  await bg.run("handleDownload('https://cdn.example.com/v.mp4', 'instagram/__kkr_____KOKORO/ig_1.jpg')");
-  assert.equal(bg.started[2].filename, 'ProfileDownloader/instagram/__kkr_____KOKORO/ig_1.jpg');
+  await bg.run("handleDownload('https://cdn.example.com/v.mp4', 'instagram/__kkr_____🄺🄾🄺🄾🅁🄾/ig_1.jpg')");
+  assert.equal(bg.started[2].filename, 'ProfileDownloader/instagram/__kkr_____🄺🄾🄺🄾🅁🄾/ig_1.jpg');
   await bg.run("handleDownload('https://cdn.example.com/v.mp4', 'instagram/user_🄺🄾🄺🄾🅁🄾/ig_2.jpg')");
-  assert.equal(bg.started[3].filename, 'ProfileDownloader/instagram/user_KOKORO/ig_2.jpg');
+  assert.equal(bg.started[3].filename, 'ProfileDownloader/instagram/user_🄺🄾🄺🄾🅁🄾/ig_2.jpg');
   await bg.run("handleDownload('https://cdn.example.com/v.mp4', 'instagram/user_💓/ig_3.jpg')");
   assert.equal(bg.started[4].filename, 'ProfileDownloader/instagram/user_💓/ig_3.jpg');
 });

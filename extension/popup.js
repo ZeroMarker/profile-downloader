@@ -574,23 +574,13 @@ async function startDownload(scope = 'all') {
 }
 
 /**
- * Normalize text scraped from the page before using it in a file path.
- *
- * NFKC turns "stylised" names into plain letters, so an Instagram display
- * name like "🄺🄾🄺🄾🅁🄾" becomes "KOKORO" instead of the boxed glyphs
- * file managers show as mojibake. Emoji and other characters are preserved.
- */
-function cleanPathText(value) {
-  return String(value || '').normalize('NFKC');
-}
-
-/**
  * Sanitize one path segment. Leading/trailing underscores are kept by
  * default because they are valid (and common) in profile handles such as
- * "__kkr____"; only the nickname has its edges trimmed.
+ * "__kkr____"; only the nickname has its edges trimmed. Display names are
+ * otherwise preserved exactly as returned by the platform.
  */
 function sanitizePathSegment(value, fallback, trimUnderscores = false) {
-  let safe = cleanPathText(value)
+  let safe = String(value || '')
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, '_')
     .replace(/[. ]+$/g, '');
   if (trimUnderscores) safe = safe.replace(/^_+|_+$/g, '');
