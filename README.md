@@ -7,9 +7,9 @@
 
 ## 版本与商店状态
 
-2026-11-16 最后核对：商店版本 **1.0.2** 已通过审核并在 Chrome 应用商店发布上架，扩展 ID 为 `jpdiaigjgblmajgkjnpliddppepgacai`。商店链接：<https://chromewebstore.google.com/detail/jpdiaigjgblmajgkjnpliddppepgacai>。
+2026-11-17 最后核对：线上商店版本为 **1.0.2**（已上架），源码版本 **1.0.3** 已提交审核，等待审核结果；提交时已勾选审核通过后自动发布。扩展 ID 为 `jpdiaigjgblmajgkjnpliddppepgacai`。商店链接：<https://chromewebstore.google.com/detail/jpdiaigjgblmajgkjnpliddppepgacai>。
 
-此后源码新增“按视频 / 图片类型下载”等改动，版本已更新为 **1.0.3**，尚未提交商店审核；webtop 中的本地安装已同步到 1.0.3。版本记录、验证范围和上传包校验值见[商店提交记录](docs/chrome-web-store/submission-history.md)。
+1.0.3 包含“按视频 / 图片类型下载”、IG 昵称读取修复和用户名首尾下划线保留；webtop 中的本地安装已同步。版本记录、验证范围和上传包校验值见[商店提交记录](docs/chrome-web-store/submission-history.md)。
 
 ## 支持的平台
 
@@ -51,7 +51,7 @@ TikTok 下载期间请保持源标签页打开。关闭或刷新源页面会将�
 3. 开启右上角的「开发者模式」。
 4. 点击「加载已解压的扩展程序」，选择解压后的目录。
 
-> Chrome 应用商店版本 **1.0.2 已发布**。源码与 webtop 安装当前为 **1.0.3**（包含按视频 / 图片类型下载），尚未提交商店；也可继续使用 GitHub Release 或源码安装。
+> Chrome 应用商店线上版本为 **1.0.2**；**1.0.3** 已提交审核（包含按视频 / 图片类型下载、IG 昵称读取修复），审核通过后自动发布。也可继续使用 GitHub Release 或源码安装。
 
 ### 从源码构建
 
@@ -130,7 +130,7 @@ Release 工作流会执行质量检查、构建 WASM、打包扩展，并上传 
 
 也可以在 GitHub 的 **Actions → Release → Run workflow** 中输入已推送的标签（例如 `v1.0.0`）手动发布或重试。工作流会检出该标签，核对扩展版本，并排除 Chrome 生成的 `_metadata`。重试已有 Release 时会更新同名 ZIP 和校验文件。
 
-GitHub Release 与 Chrome 应用商店是独立流程。商店 1.0.2 使用本地构建 ZIP 上传并已发布，但未创建 `v1.0.2` 标签或 GitHub Release；不要用商店发布状态替代 GitHub Release 记录。
+GitHub Release 与 Chrome 应用商店是独立流程。商店 1.0.2 和 1.0.3 均使用本地构建 ZIP 上传，未创建对应的 Git 标签或 GitHub Release；不要用商店发布状态替代 GitHub Release 记录。
 
 ## 贡献
 
